@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 import logging
 import sys
 
@@ -29,7 +30,9 @@ def build_agent(settings: Settings):
     ensure_owner(store, settings)
 
     mail = []
-    gmail_json, token_file = settings.secret("GMAIL_TOKEN_JSON"), settings.secret("GMAIL_TOKEN_FILE")
+    gmail_json = settings.secret("GMAIL_TOKEN_JSON")
+    token_file = settings.secret("GMAIL_TOKEN_FILE") or "secrets/gmail_token.json"
+    token_file = token_file if Path(token_file).exists() else ""
     if gmail_json or token_file:
         try:
             mail.append(GmailConnector(
@@ -154,6 +157,7 @@ def main(argv: list[str] | None = None) -> int:
     cmd = sub.add_parser("cmd", help='talk to the agent locally, e.g. neuranova cmd "send 12" or "remind me ..."')
     cmd.add_argument("text", nargs="+")
     sub.add_parser("run", help="run the scheduler (keep this running on the server)")
+    sub.add_parser("setup", help="create your console login and settings in a few questions")
     demo = sub.add_parser("demo", help="open the console on this computer with sample data (no accounts needed)")
     demo.add_argument("--port", type=int, default=8080)
     demo.add_argument("--no-browser", action="store_true")
@@ -161,6 +165,21 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    if args.command == "setup":
+        from .setup_wizard import run_interactive
+        try:
+            run_interactive()
+        except KeyboardInterrupt:
+            print("\nSetup cancelled. Nothing was changed.")
+            return 1
+        try:
+            start = input("\nStart the console now? [Y/n]: ").strip().lower() in ("", "y", "yes")
+        except (EOFError, KeyboardInterrupt):
+            start = False
+        if start:
+            run_forever(load_settings(args.config))
+        return 0
+
     if args.command == "demo":
         from .demo import run_demo
         run_demo(args.port, open_browser=not args.no_browser, config_path=args.config)

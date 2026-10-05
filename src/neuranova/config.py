@@ -9,7 +9,7 @@ from datetime import time
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 
 DAY_NAMES = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 DEFAULT_MODEL = "claude-opus-5-5"
@@ -74,7 +74,8 @@ def _color(value, default: str) -> str:
 
 def load_settings(config_path: str | Path | None = None, env: dict[str, str] | None = None) -> Settings:
     if env is None:
-        load_dotenv()
+        # The .env next to where you run the command (not next to the installed program).
+        load_dotenv(find_dotenv(usecwd=True))
         env = dict(os.environ)
     path = Path(config_path or env.get("NEURANOVA_CONFIG") or "neuranova.toml")
     raw = tomllib.loads(path.read_text()) if path.exists() else {}

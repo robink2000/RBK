@@ -16,6 +16,7 @@ dependencies = [
     "jinja2>=3.1",
     "python-multipart>=0.0.9",
     "cryptography>=42",
+    "tzdata>=2024.1",  # timezone database; Windows has none built in
 ]
 
 [project.optional-dependencies]
