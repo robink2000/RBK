@@ -1,7 +1,7 @@
 [project]
 name = "neuranova-agent"
-version = "0.1.0"
-description = "NeuraNova personal operations agent: email triage, response-time tracking, reminders and a daily brief over WhatsApp."
+version = "1.0.0"
+description = "NeuraNova PA: personal assistant for business growth, operations, communication, quality and progress."
 requires-python = ">=3.11"
 dependencies = [
     "anthropic>=1.11",
@@ -28,6 +28,7 @@ dev = ["pytest>=8"]
 
 [project.scripts]
 neuranova = "neuranova.cli:main"
+neuranova-pa = "neuranova.launcher:main"
 
 [build-system]
 requires = ["setuptools>=68"]

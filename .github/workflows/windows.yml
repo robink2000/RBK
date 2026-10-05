@@ -1,0 +1,112 @@
+name: Windows build
+
+# Builds NeuraNova PA for Windows on a real Windows machine, tests it, and publishes:
+#   NeuraNova-PA-Setup-<version>.exe   installer (no admin needed; Start menu, desktop, start-with-Windows option)
+#   NeuraNova-PA-Windows-<version>.zip portable folder with start scripts
+# Every run uploads them as artifacts; runs on main also update the "latest" GitHub release.
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      PYTHONUTF8: "1"
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]" pyinstaller
+
+      - name: Unit tests (Windows)
+        shell: pwsh
+        run: |
+          $chrome = "C:\Program Files\Google\Chrome\Application\chrome.exe"
+          if (Test-Path $chrome) { $env:NEURANOVA_CHROMIUM = $chrome }
+          python -m pytest -q
+
+      - name: Version
+        id: v
+        shell: pwsh
+        run: |
+          $v = (Select-String -Path pyproject.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+          "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Build program
+        run: pyinstaller packaging/neuranova-pa.spec --noconfirm --distpath dist --workpath build
+
+      - name: Smoke test the built program
+        run: python packaging/smoke_test.py "dist/NeuraNova PA/NeuraNova PA.exe"
+
+      - name: Portable ZIP
+        shell: pwsh
+        run: |
+          $v = "${{ steps.v.outputs.version }}"
+          New-Item -ItemType Directory -Force out\portable | Out-Null
+          Copy-Item -Recurse "dist\NeuraNova PA" "out\portable\NeuraNova PA"
+          Copy-Item packaging\portable\*.bat out\portable\
+          Copy-Item packaging\README-WINDOWS.txt out\portable\README.txt
+          Compress-Archive -Path out\portable\* -DestinationPath "dist\NeuraNova-PA-Windows-$v.zip" -CompressionLevel Optimal
+
+      - name: Installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
+          & $iscc "/DAppVersion=${{ steps.v.outputs.version }}" packaging\installer.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Test the installer (silent install, start, uninstall)
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist\NeuraNova-PA-Setup-*.exe | Select-Object -First 1
+          $p = Start-Process $setup.FullName -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /TASKS=" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "installer exit $($p.ExitCode)" }
+          $exe = "$env:LOCALAPPDATA\Programs\NeuraNova PA\NeuraNova PA.exe"
+          if (-not (Test-Path $exe)) { throw "not installed at $exe" }
+          python packaging/smoke_test.py "$exe"
+          $un = Get-ChildItem "$env:LOCALAPPDATA\Programs\NeuraNova PA\unins*.exe" | Select-Object -First 1
+          Start-Process $un.FullName -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART" -Wait
+          Start-Sleep -Seconds 5
+          if (Test-Path $exe) { throw "uninstall left the program behind" }
+          "Installer: install, start and uninstall all worked."
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NeuraNova-PA-Windows-${{ steps.v.outputs.version }}
+          path: |
+            dist/NeuraNova-PA-Setup-*.exe
+            dist/NeuraNova-PA-Windows-*.zip
+          retention-days: 30
+
+      - name: Publish "latest" release
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: NeuraNova PA ${{ steps.v.outputs.version }} (latest build)
+          prerelease: false
+          make_latest: true
+          body: |
+            Download **NeuraNova-PA-Setup-${{ steps.v.outputs.version }}.exe**, run it, and open NeuraNova PA from the Start menu.
+            No admin rights or Python needed. Prefer no installer? Use the ZIP and double-click "Start NeuraNova PA.bat".
+            Built from ${{ github.sha }}.
+          files: |
+            dist/NeuraNova-PA-Setup-*.exe
+            dist/NeuraNova-PA-Windows-*.zip

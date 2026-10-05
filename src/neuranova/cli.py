@@ -243,6 +243,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "run":
+        from dotenv import find_dotenv
+        from .setup_wizard import protect_env
+        if (found := find_dotenv(usecwd=True)) and protect_env(Path(found)):
+            log.info("Your console password in .env is now stored as a secure hash (the password itself is unchanged).")
         run_forever(settings)
         return 0
 

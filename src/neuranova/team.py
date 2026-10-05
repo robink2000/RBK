@@ -35,6 +35,11 @@ def hash_password(password: str) -> str:
     return f"scrypt${salt.hex()}${digest.hex()}"
 
 
+def is_password_hash(value: str) -> bool:
+    parts = value.split("$")
+    return len(parts) == 3 and parts[0] == "scrypt" and len(parts[1]) == 32 and len(parts[2]) == 64
+
+
 def verify_password(password: str, stored: str) -> bool:
     try:
         scheme, salt_hex, digest_hex = stored.split("$")
@@ -76,7 +81,10 @@ def ensure_owner(store: Store, settings) -> None:
     # Skip the (deliberately slow) scrypt check when the env password hasn't changed.
     fingerprint = hashlib.sha256(("owner-pw:" + password).encode()).hexdigest() if password else ""
     if password and not (existing and store.get("owner_pw_fp") == fingerprint):
-        if not (existing and verify_password(password, existing["password_hash"])):
+        if is_password_hash(password):
+            # setup stores only a scrypt hash in .env, never the password itself
+            new_hash = password if not existing or existing["password_hash"] != password else None
+        elif not (existing and verify_password(password, existing["password_hash"])):
             new_hash = hash_password(password)
         store.put("owner_pw_fp", fingerprint)
     store.upsert_user(

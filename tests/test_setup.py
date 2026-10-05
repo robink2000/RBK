@@ -1,3 +1,4 @@
+from neuranova.team import verify_password
 import builtins
 import getpass
 
@@ -16,7 +17,8 @@ def test_setup_writes_env_and_timezone(tmp_path):
                 example=example)
     values = dotenv_values(env)
     assert values["OWNER_EMAIL"] == "robin@neuranova.in" and values["OWNER_NAME"] == "Robin K"
-    assert values["DASHBOARD_PASSWORD"] == 'p#ss word "quoted" \\ long'   # special characters survive
+    assert verify_password('p#ss word "quoted" \\ long', values["DASHBOARD_PASSWORD"])   # only a hash is stored
+    assert "quoted" not in (tmp_path / ".env").read_text()
     assert len(values["DASHBOARD_SECRET"]) >= 60 and values["DASHBOARD_INSECURE_COOKIE"] == "1"
     assert values["PUBLIC_URL"] == "http://localhost:8080"
     assert "# Claude" in env.read_text()                                    # comments from the example kept
@@ -60,7 +62,7 @@ def test_interactive_flow_retries_bad_answers(tmp_path, monkeypatch):
     monkeypatch.setattr("neuranova.setup_wizard.guess_timezone", lambda: "")
     run_interactive(tmp_path / ".env", tmp_path / "neuranova.toml")
     values = dotenv_values(tmp_path / ".env")
-    assert values["OWNER_EMAIL"] == "robin@neuranova.in" and values["DASHBOARD_PASSWORD"] == "long-enough-pw"
+    assert values["OWNER_EMAIL"] == "robin@neuranova.in" and verify_password("long-enough-pw", values["DASHBOARD_PASSWORD"])
 
 
 def test_write_env_removes_and_uncomments(tmp_path):
@@ -84,3 +86,24 @@ def test_setup_switches_off_old_example_defaults(tmp_path):
     values = dotenv_values(env)
     assert "NOTIFY_CHANNEL" not in values and "GMAIL_TOKEN_FILE" not in values
     assert values["OUTLOOK_TENANT"] == "organizations"                    # a value you changed is kept
+
+
+def test_hashed_founder_password_signs_in(tmp_path):
+    from neuranova.config import load_settings
+    from neuranova.db import Store
+    from neuranova.team import authenticate, ensure_owner, hash_password
+    settings = load_settings(tmp_path / "none.toml", env={"DASHBOARD_PASSWORD": hash_password("long-enough-pw"),
+                                                          "OWNER_EMAIL": "robin@neuranova.in", "NEURANOVA_DB": ":memory:"})
+    store = Store(":memory:", settings.workspace_id, settings.owner_id)
+    ensure_owner(store, settings)
+    assert authenticate(store, "robin@neuranova.in", "long-enough-pw")
+    assert not authenticate(store, "robin@neuranova.in", settings.secret("DASHBOARD_PASSWORD"))
+
+
+def test_protect_env_hashes_plain_password_once(tmp_path):
+    from neuranova.setup_wizard import protect_env
+    env = tmp_path / ".env"
+    env.write_text("DASHBOARD_PASSWORD=long-enough-pw\nOTHER=1\n")
+    assert protect_env(env) and not protect_env(env)
+    values = dotenv_values(env)
+    assert verify_password("long-enough-pw", values["DASHBOARD_PASSWORD"]) and values["OTHER"] == "1"
