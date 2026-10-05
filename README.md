@@ -4,6 +4,21 @@ A personal operations agent for NeuraNova. It watches your Gmail and Outlook inb
 
 **Nothing is ever sent without your approval.** The agent can only send a reply after you text `send <number>` for that exact draft. It cannot delete or change email.
 
+## Try it on your laptop (2 minutes, no accounts)
+
+You need [Python 3.11+](https://www.python.org/downloads/). On Windows, tick **"Add python.exe to PATH"** during install. Then download this repository (Code → Download ZIP, unzip it) and:
+
+- **Windows:** double-click `scripts\start-demo.bat`
+- **Mac / Linux:** open Terminal in the folder and run `./scripts/start-demo.sh`
+
+The first start takes about a minute while it sets up. Your browser then opens **http://localhost:8080**. Sign in with:
+
+| Email | Password |
+|---|---|
+| `you@neuranova.demo` | `neuranova-demo` |
+
+Everything you see is sample data, kept in its own file (`data/demo.db`). Nothing is sent anywhere: "sending" a draft only marks it as sent inside the demo. Press **Ctrl+C** in the window to stop it. If port 8080 is busy, use `--port 8090`.
+
 ## What it does
 
 | Job | When | What you get on WhatsApp |
@@ -151,7 +166,8 @@ src/neuranova/
   dashboard.py      web dashboard (login, goal cards, charts, drafts, tasks, events)
   charts.py         server-rendered SVG charts
   team.py           people, invites, roles, passwords, team task rules
-  templates.py      dashboard HTML (home, team board, people, invites)
+  templates.py      dashboard HTML, NeuraNova theme and logo
+  demo.py           `neuranova demo`: the console with sample data, offline
   server.py         web app: WhatsApp webhook + dashboard
   sla.py            business-hours deadline arithmetic
   db.py             SQLite storage (workspace/owner on every row - team-ready)
@@ -159,6 +175,21 @@ src/neuranova/
   connectors/       gmail.py, outlook.py, todoist.py
 tests/              pytest suite (no network or API keys needed)
 ```
+
+## Your brand
+
+The console uses the NeuraNova theme: a violet accent, a gold "nova" star logo, and light and dark modes. To change it, edit `[brand]` in `neuranova.toml`:
+
+```toml
+[brand]
+name = "NeuraNova"
+tagline = "Operations console"
+accent = "#4a3aa7"        # light theme
+accent_dark = "#9085e9"   # dark theme
+logo = "brand/logo.svg"   # your own logo (.svg, .png, .jpg or .webp)
+```
+
+The built-in mark is also saved as `brand/neuranova-mark.svg` for slides, email signatures and so on.
 
 ## Safety
 

@@ -53,6 +53,7 @@ class Settings:
     reply_tone: str = ""
     draft_lookback_days: int = 3
     max_drafts_per_run: int = 5
+    brand: dict = field(default_factory=dict)
     model: str = DEFAULT_MODEL
     env: dict[str, str] = field(default_factory=dict, repr=False)
 
@@ -63,6 +64,12 @@ class Settings:
 def _parse_time(value: str) -> time:
     hours, minutes = value.split(":")
     return time(int(hours), int(minutes))
+
+
+def _color(value, default: str) -> str:
+    """Only plain #rgb / #rrggbb colors are accepted; they are written into the page's CSS."""
+    import re
+    return value if isinstance(value, str) and re.fullmatch(r"#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?", value) else default
 
 
 def load_settings(config_path: str | Path | None = None, env: dict[str, str] | None = None) -> Settings:
@@ -78,6 +85,7 @@ def load_settings(config_path: str | Path | None = None, env: dict[str, str] | N
     sched = raw.get("schedule", {})
     alerts = raw.get("alerts", {})
     tasks = raw.get("tasks", {})
+    brand = raw.get("brand", {})
     replies = raw.get("replies", {})
 
     days = wh.get("days", DAY_NAMES[:5])
@@ -109,6 +117,13 @@ def load_settings(config_path: str | Path | None = None, env: dict[str, str] | N
         reply_tone=replies.get("tone", "").strip(),
         draft_lookback_days=int(replies.get("draft_lookback_days", 3)),
         max_drafts_per_run=int(replies.get("max_drafts_per_run", 5)),
+        brand={
+            "name": brand.get("name", "NeuraNova"),
+            "tagline": brand.get("tagline", "Operations console"),
+            "accent": _color(brand.get("accent"), "#4a3aa7"),
+            "accent_dark": _color(brand.get("accent_dark"), "#9085e9"),
+            "logo": brand.get("logo", ""),
+        },
         model=env.get("NEURANOVA_MODEL") or DEFAULT_MODEL,
         env=env,
     )

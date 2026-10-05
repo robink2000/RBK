@@ -207,7 +207,7 @@ def test_dashboard_invite_join_and_member_view(tmp_path):
     join_path = link[link.index("/join/"):]
 
     sam = TestClient(create_app(settings, lambda: agent, store=store))
-    assert "Join NeuraNova" in sam.get(join_path).text
+    assert "Join the team" in sam.get(join_path).text
     assert sam.post(join_path, data={"password": "sam-password-1"}, follow_redirects=False).status_code == 303
     home = sam.get("/").text
     assert "My team tasks" in home and "Drafts to approve" not in home and "Agent activity" not in home

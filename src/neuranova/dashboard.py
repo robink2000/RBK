@@ -15,6 +15,7 @@ import json
 import logging
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Callable
 from urllib.parse import quote
 
@@ -29,11 +30,13 @@ from .db import row_dt
 from .progress import EVENT_KINDS, compute, team_stats, weekly_series
 from .team import (TeamError, accept_invite, authenticate, can_change, create_invite, create_reset_link,
                    ensure_owner, parse_due, set_active, token_hash)
-from .templates import ICON, MANIFEST, env
+from .templates import ICON, env, manifest as build_manifest
 
 log = logging.getLogger(__name__)
 
 COOKIE = "nn_session"
+LOGO_TYPES = {".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+              ".webp": "image/webp"}
 SESSION_SECONDS = 14 * 24 * 3600
 MAX_FAILURES, FAILURE_WINDOW = 5, 15 * 60
 
@@ -81,6 +84,13 @@ def mount_dashboard(app: FastAPI, settings: Settings, agent_factory: Callable, s
     secure_cookie = settings.secret("DASHBOARD_INSECURE_COOKIE") != "1"
     public_url = settings.secret("PUBLIC_URL").rstrip("/")
     sessions = Sessions(secret) if secret else None
+    brand = dict(settings.brand or {}) or dict(env.globals["brand"])
+    logo_path = Path(brand.get("logo") or "")
+    logo_type = LOGO_TYPES.get(logo_path.suffix.lower())
+    brand["logo_url"] = "/brand/logo" if brand.get("logo") and logo_type and logo_path.is_file() else ""
+    if brand.get("logo") and not brand["logo_url"]:
+        log.warning("Brand logo %s not found or not .svg/.png/.jpg/.webp; using the built-in mark", logo_path)
+    env.globals["brand"] = brand
     failures: dict[str, list[float]] = {}
     if store is not None and settings.secret("DASHBOARD_PASSWORD"):
         ensure_owner(store, settings)
@@ -128,7 +138,18 @@ def mount_dashboard(app: FastAPI, settings: Settings, agent_factory: Callable, s
 
     @app.get("/manifest.webmanifest")
     def manifest() -> Response:
-        return Response(json.dumps(MANIFEST), media_type="application/manifest+json")
+        data = build_manifest(brand)
+        if brand["logo_url"]:
+            data["icons"] = [{"src": "/brand/logo", "sizes": "any", "type": logo_type}]
+        return Response(json.dumps(data), media_type="application/manifest+json")
+
+    @app.get("/brand/logo")
+    def brand_logo() -> Response:
+        if not brand["logo_url"]:
+            return Response(status_code=404)
+        return Response(logo_path.read_bytes(), media_type=logo_type,
+                        headers={"Cache-Control": "public, max-age=3600",
+                                 "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'"})
 
     @app.get("/icon.svg")
     def icon() -> Response:

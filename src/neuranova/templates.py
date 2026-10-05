@@ -9,35 +9,51 @@ BASE = """<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NeuraNova Agent</title>
+<title>{{ brand.name }}</title>
 <link rel="manifest" href="/manifest.webmanifest">
-<link rel="icon" href="/icon.svg" type="image/svg+xml">
-<meta name="theme-color" content="#2a78d6">
+<link rel="icon" href="{{ brand.logo_url or '/icon.svg' }}">
+<meta name="theme-color" content="{{ brand.accent }}">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <style>
+/* NeuraNova: a quiet violet-tinted workspace; the brand shows in the header mark,
+   the violet accent and the gold "nova" spark. Everything else stays calm for scanning. */
 :root {
   color-scheme: light;
-  --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
-  --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,0.10); --series-1: #2a78d6;
+  --page: #f6f5fb; --surface: #ffffff; --ink: #15122b; --ink-2: #4b4862; --muted: #85829b;
+  --grid: #e5e3f0; --axis: #c8c5d9; --border: rgba(21,18,43,0.10);
+  --accent: {{ brand.accent }}; --accent-ink: #ffffff; --series-1: {{ brand.accent }};
+  --spark: #eda100; --mark-bg: #1d1640;
   --good: #0ca30c; --good-ink: #006300; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b;
-  --accent: #2a78d6; --accent-ink: #ffffff;
+  --font-display: "Sora", "Segoe UI", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
-    --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10); --series-1: #3987e5;
-    --good-ink: #0ca30c; --accent: #3987e5;
+    --page: #0e0c1a; --surface: #17142a; --ink: #f4f3fb; --ink-2: #c4c1d9; --muted: #8d8aa6;
+    --grid: #2a2640; --axis: #3a3655; --border: rgba(244,243,251,0.10);
+    --accent: {{ brand.accent_dark }}; --accent-ink: #0e0c1a; --series-1: {{ brand.accent_dark }};
+    --spark: #f5b83d; --mark-bg: #2a2150; --good-ink: #0ca30c;
   }
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
-  --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10); --series-1: #3987e5;
-  --good-ink: #0ca30c; --accent: #3987e5;
+  --page: #0e0c1a; --surface: #17142a; --ink: #f4f3fb; --ink-2: #c4c1d9; --muted: #8d8aa6;
+  --grid: #2a2640; --axis: #3a3655; --border: rgba(244,243,251,0.10);
+  --accent: {{ brand.accent_dark }}; --accent-ink: #0e0c1a; --series-1: {{ brand.accent_dark }};
+  --spark: #f5b83d; --mark-bg: #2a2150; --good-ink: #0ca30c;
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--page); color: var(--ink);
-       font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+body { margin: 0; background: var(--page); color: var(--ink); font: 15px/1.5 var(--font-body); }
+h1, h2, .hero, .brand-name { font-family: var(--font-display); text-wrap: balance; }
+h2 { letter-spacing: -0.005em; }
+.brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--ink); }
+.brand svg, .brand img { width: 36px; height: 36px; flex: none; border-radius: 10px; }
+.brand-name { font-size: 20px; font-weight: 700; letter-spacing: -0.01em; line-height: 1.1; }
+.brand-name .nova { color: var(--accent); }
+.brand-tag { color: var(--muted); font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; }
 main { max-width: 1080px; margin: 0 auto; padding: 16px 16px 48px; }
 header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
 h1 { font-size: 20px; margin: 0; }
@@ -112,10 +128,10 @@ nav.top a.on { background: color-mix(in srgb, var(--accent) 14%, transparent); c
 <body><main>{% block body %}{% endblock %}</main></body>
 </html>"""
 
-LOGIN = """{% extends "base" %}{% block body %}
+LOGIN = """{% extends "base" %}{% from "nav" import brand_logo, brand_wordmark with context %}{% block body %}
 <div class="card login">
-  <h1>NeuraNova Agent</h1>
-  <p class="sub">Sign in to your dashboard.</p>
+  <div class="brand" style="margin-bottom:12px">{{ brand_logo() }}<div><div class="brand-name">{{ brand_wordmark() }}</div><div class="brand-tag">{{ brand.tagline }}</div></div></div>
+  <p class="sub">Sign in to your console.</p>
   {% if error %}<p class="over">{{ error }}</p>{% endif %}
   <form method="post" action="/login">
     <label for="em">Email</label>
@@ -127,9 +143,12 @@ LOGIN = """{% extends "base" %}{% block body %}
 </div>
 {% endblock %}"""
 
-NAV = """{% macro top(page, user, csrf, today) %}
+NAV = """{% macro brand_logo() %}{% if brand.logo_url %}<img src="{{ brand.logo_url }}" alt="">{% else %}""" + "{{ mark|safe }}" + """{% endif %}{% endmacro %}
+{% macro brand_wordmark() %}{% if brand.name == 'NeuraNova' %}Neura<span class="nova">Nova</span>{% else %}{{ brand.name }}{% endif %}{% endmacro %}
+{% macro top(page, user, csrf, today) %}
 <header>
-  <div><h1>NeuraNova</h1><div class="sub">{{ today }}</div></div>
+  <a class="brand" href="/" aria-label="{{ brand.name }} home">{{ brand_logo() }}
+    <div><div class="brand-name">{{ brand_wordmark() }}</div><div class="sub">{{ today }}</div></div></a>
   <nav class="top" aria-label="Main">
     <a href="/" class="{{ 'on' if page == 'home' else '' }}">Home</a>
     <a href="/team" class="{{ 'on' if page == 'team' else '' }}">Team</a>
@@ -186,7 +205,7 @@ CHART = """{% macro chart(c, title, table_label, note="") %}
 </table></details>
 {% endmacro %}"""
 
-DASHBOARD = """{% extends "base" %}{% from "chart" import chart %}{% from "nav" import top, task_row %}{% block body %}
+DASHBOARD = """{% extends "base" %}{% from "chart" import chart %}{% from "nav" import top, task_row with context %}{% block body %}
 {% macro mytasks() %}
 <section class="card" id="mytasks">
   <h2>My team tasks ({{ my_tasks|length }})</h2>
@@ -319,22 +338,36 @@ DASHBOARD = """{% extends "base" %}{% from "chart" import chart %}{% from "nav" 
 {% endif %}
 {% endblock %}"""
 
-MANIFEST = {
-    "name": "NeuraNova Agent", "short_name": "NeuraNova", "start_url": "/", "display": "standalone",
-    "background_color": "#f9f9f7", "theme_color": "#2a78d6",
-    "icons": [{"src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"}],
-}
+# The NeuraNova mark: a four-point "nova" star at the centre of a ring of connected nodes.
+MARK = """<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="NeuraNova logo">
+<rect width="64" height="64" rx="16" fill="var(--mark-bg, #1d1640)"/>
+<circle cx="32" cy="32" r="19" fill="none" stroke="#9085e9" stroke-width="1.6" opacity="0.55"/>
+<g stroke="#9085e9" stroke-width="1.4" opacity="0.8"><line x1="32" y1="32" x2="45.4" y2="18.6"/><line x1="32" y1="32" x2="15.6" y2="41.5"/><line x1="32" y1="32" x2="44" y2="46.6"/></g>
+<g fill="#b9b0ff"><circle cx="45.4" cy="18.6" r="3"/><circle cx="15.6" cy="41.5" r="3"/><circle cx="44" cy="46.6" r="2.4"/></g>
+<path d="M32 13.5C33.6 25.6 38.4 30.4 50.5 32C38.4 33.6 33.6 38.4 32 50.5C30.4 38.4 25.6 33.6 13.5 32C25.6 30.4 30.4 25.6 32 13.5Z" fill="var(--spark, #f5b83d)"/>
+<circle cx="32" cy="32" r="3.2" fill="#ffffff"/>
+</svg>"""
 
-ICON = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#2a78d6"/>
-<path d="M18 46V18l28 28V18" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/></svg>"""
+# Same mark with fixed colors, for the browser tab and home-screen icon (no page CSS there).
+ICON = MARK.replace("var(--mark-bg, #1d1640)", "#1d1640").replace("var(--spark, #f5b83d)", "#f5b83d")
+
+
+def manifest(brand) -> dict:
+    return {
+        "name": brand["name"], "short_name": brand["name"], "start_url": "/", "display": "standalone",
+        "background_color": "#0e0c1a", "theme_color": brand["accent"],
+        "icons": [{"src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"}],
+    }
 
 
 
 
 
-JOIN = """{% extends "base" %}{% block body %}
+
+JOIN = """{% extends "base" %}{% from "nav" import brand_logo, brand_wordmark with context %}{% block body %}
 <div class="card login">
-  <h1>Join NeuraNova</h1>
+  <div class="brand" style="margin-bottom:12px">{{ brand_logo() }}<div class="brand-name">{{ brand_wordmark() }}</div></div>
+  <h1>Join the team</h1>
   {% if error %}<p class="over">{{ error }}</p>{% endif %}
   {% if invite %}
   <p class="sub">Hi {{ invite.name }} - choose a password for <strong>{{ invite.email }}</strong>.</p>
@@ -347,7 +380,7 @@ JOIN = """{% extends "base" %}{% block body %}
 </div>
 {% endblock %}"""
 
-LINK = """{% extends "base" %}{% from "nav" import top %}{% block body %}
+LINK = """{% extends "base" %}{% from "nav" import top with context %}{% block body %}
 {{ top('team', me, csrf, today) }}
 <section class="card">
   <h2>{{ title }}</h2>
@@ -358,7 +391,7 @@ LINK = """{% extends "base" %}{% from "nav" import top %}{% block body %}
 </section>
 {% endblock %}"""
 
-TEAM = """{% extends "base" %}{% from "nav" import top, task_row %}{% block body %}
+TEAM = """{% extends "base" %}{% from "nav" import top, task_row with context %}{% block body %}
 {{ top('team', me, csrf, today) }}
 {% if msg %}<div class="flash" role="status">{{ msg }}</div>{% endif %}
 
@@ -446,3 +479,6 @@ env = Environment(
                        "join": JOIN, "link": LINK, "team": TEAM}),
     autoescape=select_autoescape(default=True, default_for_string=True),
 )
+env.globals["mark"] = MARK
+env.globals["brand"] = {"name": "NeuraNova", "tagline": "Operations console", "accent": "#4a3aa7",
+                        "accent_dark": "#9085e9", "logo_url": ""}

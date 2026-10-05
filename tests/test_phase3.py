@@ -196,3 +196,30 @@ def test_dashboard_off_without_secret(tmp_path):
     client = TestClient(create_app(settings, lambda: None, store=store))
     assert client.get("/login").status_code == 503
     assert client.get("/", follow_redirects=False).headers["location"] == "/login"
+
+
+def test_demo_builds_and_signs_in(tmp_path):
+    from neuranova.demo import DEMO_EMAIL, DEMO_PASSWORD, build_demo
+    settings, store, agent = build_demo(tmp_path / "demo.db")
+    client = TestClient(create_app(settings, lambda: agent, store=store))
+    assert client.post("/login", data={"email": DEMO_EMAIL, "password": DEMO_PASSWORD},
+                       follow_redirects=False).status_code == 303
+    page = client.get("/").text
+    assert 'Neura<span class="nova">Nova</span>' in page and "Drafts to approve" in page
+    assert client.get("/icon.svg").headers["content-type"].startswith("image/svg")
+
+
+def test_custom_brand_logo_and_safe_colors(tmp_path):
+    logo = tmp_path / "logo.png"
+    logo.write_bytes(b"\x89PNG\r\n\x1a\nfake")
+    cfg = tmp_path / "n.toml"
+    cfg.write_text(f'[brand]\nname = "Acme Ops"\naccent = "red;}}body{{display:none"\nlogo = "{logo}"\n')
+    env = {"DASHBOARD_PASSWORD": "pw-long-enough", "DASHBOARD_SECRET": "s" * 40, "DASHBOARD_INSECURE_COOKIE": "1",
+           "NEURANOVA_DB": ":memory:"}
+    settings = load_settings(cfg, env=env)
+    assert settings.brand["accent"] == "#4a3aa7"                    # unsafe value rejected
+    store = Store(":memory:", settings.workspace_id, settings.owner_id)
+    client = TestClient(create_app(settings, lambda: SimpleNamespace(store=store), store=store))
+    login_page = client.get("/login").text
+    assert "Acme Ops" in login_page and 'src="/brand/logo"' in login_page
+    assert client.get("/brand/logo").content.startswith(b"\x89PNG")

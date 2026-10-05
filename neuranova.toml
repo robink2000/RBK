@@ -1,5 +1,13 @@
 # Non-secret settings for the NeuraNova agent.
 
+[brand]
+name = "NeuraNova"
+tagline = "Operations console"
+accent = "#4a3aa7"        # buttons, links and charts (light theme)
+accent_dark = "#9085e9"   # the same accent for dark theme
+# Your own logo instead of the built-in mark: put the file in the project and give its path.
+# logo = "brand/logo.svg"   # .svg, .png, .jpg or .webp
+
 [workspace]
 id = "neuranova"
 owner_id = "owner"      # becomes a real user id when the team joins

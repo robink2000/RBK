@@ -123,10 +123,18 @@ def main(argv: list[str] | None = None) -> int:
     cmd = sub.add_parser("cmd", help='talk to the agent locally, e.g. neuranova cmd "send 12" or "remind me ..."')
     cmd.add_argument("text", nargs="+")
     sub.add_parser("run", help="run the scheduler (keep this running on the server)")
+    demo = sub.add_parser("demo", help="open the console on this computer with sample data (no accounts needed)")
+    demo.add_argument("--port", type=int, default=8080)
+    demo.add_argument("--no-browser", action="store_true")
 
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    if args.command == "demo":
+        from .demo import run_demo
+        run_demo(args.port, open_browser=not args.no_browser, config_path=args.config)
+        return 0
+
     settings = load_settings(args.config)
 
     if args.command == "auth":
