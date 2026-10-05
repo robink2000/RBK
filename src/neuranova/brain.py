@@ -111,6 +111,21 @@ DRAFT_SCHEMA = {
 }
 
 
+WEEKLY_SYSTEM = """You write the founder of NeuraNova a weekly progress report for WhatsApp.
+
+Business goals:
+{goals}
+
+Rules:
+- Plain WhatsApp text, short lines, *bold* only for the three goal names.
+- One short section per goal: the numbers that matter this week, compared with last week and the
+  8-week trend where the data allows, and a clear verdict (on track / needs attention).
+- End with the 2-3 most useful actions for next week, concrete and tied to the numbers.
+- Missing data is information: if nothing was logged for quality, say so and suggest logging deliveries
+  and feedback ("delivered Acme site on time" in chat).
+- Only use the data given. Under 1500 characters."""
+
+
 class ModelRefused(RuntimeError):
     pass
 
@@ -209,6 +224,15 @@ class Brain:
             + f"\n\n<current_draft>\n{escape(current)}\n</current_draft>\n\n"
             f"<founder_instruction>\n{escape(instruction)}\n</founder_instruction>"
         )
+
+    def write_weekly(self, facts: dict) -> str:
+        return self._call(
+            WEEKLY_SYSTEM.format(goals=goals_text(self.goals)),
+            "Write this week's progress report from this data:\n\n<data>\n"
+            + json.dumps(facts, indent=1, default=str) + "\n</data>",
+            effort="medium",
+            max_tokens=8000,
+        ).strip()
 
     def write_brief(self, facts: dict) -> str:
         return self._call(

@@ -48,6 +48,28 @@ CREATE TABLE IF NOT EXISTS drafts (
 );
 CREATE INDEX IF NOT EXISTS drafts_status ON drafts (owner_id, status);
 
+CREATE TABLE IF NOT EXISTS events (
+    id           INTEGER PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    owner_id     TEXT NOT NULL,
+    on_date      TEXT NOT NULL,            -- YYYY-MM-DD, local date the thing happened
+    kind         TEXT NOT NULL,
+    client       TEXT NOT NULL DEFAULT '',
+    value        REAL,
+    note         TEXT NOT NULL DEFAULT '',
+    source       TEXT NOT NULL,            -- chat | dashboard
+    created_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS events_date ON events (workspace_id, on_date);
+
+CREATE TABLE IF NOT EXISTS chat_log (
+    id       INTEGER PRIMARY KEY,
+    owner_id TEXT NOT NULL,
+    at       TEXT NOT NULL,
+    role     TEXT NOT NULL,                -- founder | agent
+    text     TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS inbound_seen (
     message_id TEXT PRIMARY KEY,
     at         TEXT NOT NULL
@@ -281,6 +303,71 @@ class Store:
         )
         self.conn.commit()
         return cur.rowcount
+
+    # --- business events (progress tracking) ----------------------------------
+
+    def add_event(self, on_date: str, kind: str, client: str = "", value: float | None = None,
+                  note: str = "", source: str = "chat") -> int:
+        cur = self.conn.execute(
+            """INSERT INTO events (workspace_id, owner_id, on_date, kind, client, value, note, source, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (self.workspace_id, self.owner_id, on_date, kind, client, value, note, source,
+             _iso(datetime.now(timezone.utc))),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def events_between(self, start_date: str, end_date: str) -> list[sqlite3.Row]:
+        """Events with start_date <= on_date < end_date (workspace-wide, shared with the team later)."""
+        return self.conn.execute(
+            "SELECT * FROM events WHERE workspace_id = ? AND on_date >= ? AND on_date < ? ORDER BY on_date, id",
+            (self.workspace_id, start_date, end_date),
+        ).fetchall()
+
+    def recent_events(self, limit: int = 15) -> list[sqlite3.Row]:
+        return self.conn.execute(
+            "SELECT * FROM events WHERE workspace_id = ? ORDER BY on_date DESC, id DESC LIMIT ?",
+            (self.workspace_id, limit),
+        ).fetchall()
+
+    def delete_event(self, event_id: int) -> bool:
+        cur = self.conn.execute("DELETE FROM events WHERE id = ? AND workspace_id = ?", (event_id, self.workspace_id))
+        self.conn.commit()
+        return cur.rowcount == 1
+
+    def emails_between(self, start: datetime, end: datetime) -> list[sqlite3.Row]:
+        return self.conn.execute(
+            """SELECT * FROM emails WHERE owner_id = ? AND triaged_at IS NOT NULL
+               AND received_at >= ? AND received_at < ? ORDER BY received_at""",
+            (self.owner_id, _iso(start), _iso(end)),
+        ).fetchall()
+
+    def search_emails(self, text: str, limit: int = 10) -> list[sqlite3.Row]:
+        like = f"%{text}%"
+        return self.conn.execute(
+            """SELECT * FROM emails WHERE owner_id = ? AND triaged_at IS NOT NULL
+               AND (sender LIKE ? OR subject LIKE ? OR summary LIKE ?)
+               ORDER BY received_at DESC LIMIT ?""",
+            (self.owner_id, like, like, like, limit),
+        ).fetchall()
+
+    def recent_activity(self, limit: int = 20) -> list[sqlite3.Row]:
+        return self.conn.execute(
+            "SELECT * FROM activity_log WHERE owner_id = ? ORDER BY id DESC LIMIT ?", (self.owner_id, limit)
+        ).fetchall()
+
+    # --- chat memory ------------------------------------------------------------
+
+    def add_chat(self, role: str, text: str) -> None:
+        self.conn.execute("INSERT INTO chat_log (owner_id, at, role, text) VALUES (?, ?, ?, ?)",
+                          (self.owner_id, _iso(datetime.now(timezone.utc)), role, text))
+        self.conn.commit()
+
+    def recent_chat(self, limit: int = 8) -> list[sqlite3.Row]:
+        rows = self.conn.execute(
+            "SELECT * FROM chat_log WHERE owner_id = ? ORDER BY id DESC LIMIT ?", (self.owner_id, limit)
+        ).fetchall()
+        return list(reversed(rows))
 
     # --- inbound WhatsApp ---------------------------------------------------
 

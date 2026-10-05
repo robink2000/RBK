@@ -59,7 +59,7 @@ Start this early, because approvals can take a few days. Until it's done, keep `
 7. `WHATSAPP_RECIPIENT` is **your** personal number in international format without `+`, e.g. `919876543210`.
 8. Set `NOTIFY_CHANNEL=whatsapp` and run `neuranova test-notify`.
 
-**Why templates?** WhatsApp only allows free-form messages within 24 hours of *you* messaging the bot. The agent messages you first, so it uses the approved template, and Meta charges a small fee per template message. Two-way chat (you text the bot) comes in Phase 3.
+**Why templates?** WhatsApp only allows free-form messages within 24 hours of *you* messaging the bot. The agent messages you first, so it uses the approved template, and Meta charges a small fee per template message. Once you text the bot, it can reply normally for the next 24 hours.
 
 ### 5b. Webhook: so you can reply to the bot (send / edit / skip)
 
@@ -86,6 +86,17 @@ Once you've messaged the bot, WhatsApp lets it send normal messages for 24 hours
 ### 5c. Your reply style
 
 In `neuranova.toml` under `[replies]`, set your **signature** (replace `[Your name]`) and **tone**. Until you replace `[Your name]`, every draft has a blank and the agent will refuse to send it.
+
+### 5d. Dashboard
+
+1. In `.env`:
+   - `DASHBOARD_PASSWORD`: a long password
+   - `DASHBOARD_SECRET`: generate one with `python3 -c "import secrets; print(secrets.token_urlsafe(48))"`
+2. The dashboard is served at the same address as the webhook, e.g. `https://agent.yourdomain.com/`. The Caddy setup in 5b already covers it.
+3. On your phone, open it and choose **Add to Home screen** to use it like an app.
+4. To try it locally without HTTPS, add `DASHBOARD_INSECURE_COOKIE=1` to `.env`, run `neuranova run`, and open `http://localhost:8080`. Never set this on the real server.
+
+Progress for the quality goal and for deals comes from what you log. Either tell the bot on WhatsApp ("delivered the Acme site on time", "won Globex, 80000") or use the **Log progress** form on the dashboard.
 
 ## 6. Run it on a server
 

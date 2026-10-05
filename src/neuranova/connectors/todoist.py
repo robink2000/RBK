@@ -61,6 +61,11 @@ class TodoistConnector:
         return _task(resp.json())
 
 
+    def close_task(self, task_id: str) -> None:
+        resp = self.http.post(f"{API}/tasks/{task_id}/close", headers=self.headers)
+        resp.raise_for_status()
+
+
 def localize(task: Task, tz) -> datetime | None:
     """Timed tasks as an aware datetime in `tz` (floating times are taken as local)."""
     if task.due_datetime is None:

@@ -18,6 +18,8 @@ categories = ["client", "lead", "partner"]
 
 [schedule]
 morning_brief = "08:30"
+weekly_report_day = "mon"
+weekly_report_time = "09:00"
 inbox_check_minutes = 15
 sla_check_minutes = 15
 task_reminder_minutes = 10

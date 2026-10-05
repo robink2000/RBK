@@ -1,4 +1,6 @@
-"""WhatsApp webhook: receives the founder's replies (send / edit / skip ...) from Meta.
+"""Web server: the WhatsApp webhook (below) and the dashboard (dashboard.py).
+
+WhatsApp webhook: receives the founder's replies (send / edit / skip ...) from Meta.
 
 Security:
 - Every POST must carry a valid X-Hub-Signature-256 made with the Meta app secret.
@@ -19,8 +21,10 @@ from typing import Callable
 from fastapi import BackgroundTasks, FastAPI, Request, Response
 from fastapi.responses import PlainTextResponse
 
+from .assistant import Assistant
 from .commands import handle
 from .config import Settings
+from .dashboard import mount_dashboard
 from .db import Store
 from .notify import LAST_INBOUND_KEY
 
@@ -53,6 +57,7 @@ def message_text(msg: dict) -> str | None:
 
 def create_app(settings: Settings, agent_factory: Callable, store: Store | None = None) -> FastAPI:
     app = FastAPI(title="NeuraNova agent", docs_url=None, redoc_url=None, openapi_url=None)
+    mount_dashboard(app, settings, agent_factory)
     verify_token = settings.secret("WHATSAPP_VERIFY_TOKEN")
     app_secret = settings.secret("WHATSAPP_APP_SECRET")
     owner = _digits(settings.secret("WHATSAPP_RECIPIENT"))
@@ -61,7 +66,7 @@ def create_app(settings: Settings, agent_factory: Callable, store: Store | None 
     def process(text: str) -> None:
         agent = agent_factory()
         try:
-            reply = handle(agent, text)
+            reply = handle(agent, text, chat=lambda t: Assistant(agent).reply(t))
         except Exception:
             log.exception("Command failed: %r", text[:80])
             reply = "Sorry, something went wrong handling that. Check the server log."

@@ -39,6 +39,8 @@ class Settings:
     sla_categories: frozenset[str]
     goals: tuple[Goal, ...]
     morning_brief: time
+    weekly_report_day: str
+    weekly_report_time: time
     inbox_check_minutes: int
     sla_check_minutes: int
     task_reminder_minutes: int
@@ -93,6 +95,8 @@ def load_settings(config_path: str | Path | None = None, env: dict[str, str] | N
         sla_categories=frozenset(sla.get("categories", ["client", "lead", "partner"])),
         goals=tuple(Goal(g["name"], g.get("measure", "")) for g in raw.get("goals", [])),
         morning_brief=_parse_time(sched.get("morning_brief", "08:30")),
+        weekly_report_day=sched.get("weekly_report_day", "mon").lower()[:3],
+        weekly_report_time=_parse_time(sched.get("weekly_report_time", "09:00")),
         inbox_check_minutes=int(sched.get("inbox_check_minutes", 15)),
         sla_check_minutes=int(sched.get("sla_check_minutes", 15)),
         task_reminder_minutes=int(sched.get("task_reminder_minutes", 10)),

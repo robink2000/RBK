@@ -56,7 +56,11 @@ def run_forever(settings: Settings) -> None:
     webhook = bool(settings.secret("WHATSAPP_VERIFY_TOKEN"))
     if webhook and not settings.secret("WHATSAPP_APP_SECRET"):
         raise SystemExit("WHATSAPP_APP_SECRET is required when the webhook is enabled (see docs/SETUP.md)")
-    sched = (BackgroundScheduler if webhook else BlockingScheduler)(timezone=settings.tz)
+    dashboard = bool(settings.secret("DASHBOARD_PASSWORD"))
+    if dashboard and len(settings.secret("DASHBOARD_SECRET")) < 32:
+        raise SystemExit("DASHBOARD_SECRET must be a random string of at least 32 characters (see docs/SETUP.md)")
+    web = webhook or dashboard
+    sched = (BackgroundScheduler if web else BlockingScheduler)(timezone=settings.tz)
 
     def job(name):
         def run():
@@ -75,18 +79,23 @@ def run_forever(settings: Settings) -> None:
                   max_instances=1, coalesce=True)
     sched.add_job(job("morning_brief"), "cron", hour=settings.morning_brief.hour,
                   minute=settings.morning_brief.minute, id="brief", max_instances=1, coalesce=True)
+    sched.add_job(job("weekly_report"), "cron", day_of_week=settings.weekly_report_day,
+                  hour=settings.weekly_report_time.hour, minute=settings.weekly_report_time.minute,
+                  id="weekly", max_instances=1, coalesce=True)
     log.info("NeuraNova agent running. Morning brief at %s (%s). Ctrl+C to stop.",
              settings.morning_brief.strftime("%H:%M"), settings.tz.key)
     job("check_inbox")()
     sched.start()
-    if webhook:
+    if web:
         import uvicorn
 
         from .server import create_app
 
         port = int(settings.secret("WEBHOOK_PORT") or 8080)
-        log.info("WhatsApp webhook listening on port %s at /webhook", port)
-        uvicorn.run(create_app(settings, lambda: build_agent(settings)), host="0.0.0.0", port=port,
+        host = settings.secret("WEB_HOST") or "127.0.0.1"
+        log.info("Web server on %s:%s (webhook: %s, dashboard: %s)", host, port,
+                 "on" if webhook else "off", "on" if dashboard else "off")
+        uvicorn.run(create_app(settings, lambda: build_agent(settings)), host=host, port=port,
                     log_level="warning")
 
 
@@ -102,9 +111,11 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("sla", help="check reply deadlines now")
     sub.add_parser("reminders", help="send due task reminders now")
     sub.add_parser("brief", help="build and send the morning brief now")
+    sub.add_parser("weekly", help="build and send the weekly progress report now")
+    sub.add_parser("progress", help="print goal progress numbers (no Claude call, nothing sent)")
     sub.add_parser("facts", help="print the data the brief is built from (no Claude call, nothing sent)")
     sub.add_parser("test-notify", help="send a test message on the configured channel")
-    cmd = sub.add_parser("cmd", help='run a WhatsApp command locally, e.g. neuranova cmd "send 12"')
+    cmd = sub.add_parser("cmd", help='talk to the agent locally, e.g. neuranova cmd "send 12" or "remind me ..."')
     cmd.add_argument("text", nargs="+")
     sub.add_parser("run", help="run the scheduler (keep this running on the server)")
 
@@ -145,9 +156,17 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"sent": agent.task_reminders()}))
     elif args.command == "brief":
         agent.morning_brief()
+    elif args.command == "weekly":
+        agent.weekly_report()
+    elif args.command == "progress":
+        from .progress import compute, weekly_series
+        print(json.dumps({"last_7_days": compute(agent.store, settings.tz, 7),
+                          "last_30_days": compute(agent.store, settings.tz, 30),
+                          "by_week": weekly_series(agent.store, settings.tz)}, indent=2))
     elif args.command == "cmd":
+        from .assistant import Assistant
         from .commands import handle
-        print(handle(agent, " ".join(args.text)))
+        print(handle(agent, " ".join(args.text), chat=Assistant(agent).reply))
     elif args.command == "facts":
         print(json.dumps(agent.gather_brief_facts(), indent=2, default=str))
     return 0

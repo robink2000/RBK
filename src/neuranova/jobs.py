@@ -15,6 +15,7 @@ from .connectors.gmail import sender_name
 from .connectors.todoist import TodoistConnector, localize
 from .db import Store, row_dt
 from .notify import Notifier
+from .progress import compute as compute_progress, weekly_series
 from .sla import reply_deadline
 
 log = logging.getLogger(__name__)
@@ -325,7 +326,21 @@ class Agent:
             "response_record_last_7_days": self.store.response_stats(now - timedelta(days=7)),
             "tasks_today_and_overdue": tasks,
             "reply_drafts_waiting_for_your_approval": len(self.store.pending_drafts()),
+            "goal_progress_last_7_days": compute_progress(self.store, self.settings.tz, days=7),
         }
+
+    def weekly_report(self) -> str:
+        facts = {
+            "this_week": compute_progress(self.store, self.settings.tz, days=7),
+            "last_30_days": compute_progress(self.store, self.settings.tz, days=30),
+            "by_week": weekly_series(self.store, self.settings.tz, weeks=8),
+            "recent_events": [dict(e) for e in self.store.recent_events(20)],
+        }
+        text = self.brain.write_weekly(facts)
+        self.notifier.send(text, teaser="Your weekly NeuraNova progress report is ready. Reply 'report' to read it.")
+        self.store.put("last_weekly_report", text)
+        self.store.log("weekly_report", chars=len(text))
+        return text
 
     def morning_brief(self) -> str:
         self.check_inbox()
