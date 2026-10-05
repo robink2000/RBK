@@ -40,7 +40,7 @@ Name: "{group}\NeuraNova PA (sample data demo)"; Filename: "{app}\NeuraNova PA.e
 Name: "{group}\Open NeuraNova PA data folder"; Filename: "{localappdata}\NeuraNova PA"
 Name: "{group}\Uninstall NeuraNova PA"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\NeuraNova PA"; Filename: "{app}\NeuraNova PA.exe"; Tasks: desktopicon
-Name: "{userstartup}\NeuraNova PA"; Filename: "{app}\NeuraNova PA.exe"; Parameters: "--no-browser"; WindowStartup: minimized; Tasks: startup
+Name: "{userstartup}\NeuraNova PA"; Filename: "{app}\NeuraNova PA.exe"; Parameters: "--no-browser"; Flags: runminimized; Tasks: startup
 
 [Run]
 Filename: "{app}\NeuraNova PA.exe"; Description: "Start NeuraNova PA now"; Flags: nowait postinstall skipifsilent
