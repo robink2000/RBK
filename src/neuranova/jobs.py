@@ -185,6 +185,39 @@ class Agent:
         from .pa import proactive
         return proactive.run(self.store, self.settings, self.notifier.send)
 
+    def run_qa(self, environment: str) -> dict:
+        """Run the application checks for one environment, record issues, alert on Production problems."""
+        from pathlib import Path
+
+        from .integrations import qa_config
+        from .pa import qa
+
+        cfg = qa_config(self.settings, self.store)
+        base = cfg.get(environment)
+        if not base:
+            return {"skipped": f"No {qa.ENVIRONMENTS[environment]} address set"}
+        run_id = self.pa.start_qa_run(environment)
+        evidence = Path(self.settings.db_path).parent / "qa" / f"run-{run_id}" if str(self.settings.db_path) != ":memory:" \
+            else Path("data/qa") / f"run-{run_id}"
+        try:
+            results = qa.run_environment(environment, base, cfg["accounts"].get(environment, {}),
+                                         qa.parse_workflows(cfg["workflows"]), evidence,
+                                         login_path=cfg["login_path"], allow_prod_login=cfg["allow_prod_login"])
+        except Exception as exc:
+            log.exception("QA run failed to start")
+            self.pa.finish_qa_run(run_id, "error", str(exc)[:300], [])
+            return {"error": str(exc)}
+        counts = qa.record(self.pa, results)
+        failed = [r for r in results if not r.ok]
+        self.pa.finish_qa_run(run_id, "failed" if failed else "passed", qa.summary_text(results, counts),
+                              qa.results_json(results))
+        self.store.log("qa_run", environment=environment, **counts)
+        if environment == "production" and (counts["new"] or counts["regressions"]):
+            lines = [f"🚨 NeuraNova Production: {len(failed)} check(s) failing"]
+            lines += [f"- {r.role} · {r.workflow}: {r.error[:120]}" for r in failed[:5]]
+            self.notifier.send("\n".join(lines), teaser=f"NeuraNova Production: {len(failed)} check(s) failing.")
+        return {"run_id": run_id, "passed": len(results) - len(failed), "failed": len(failed), **counts}
+
     def briefing(self, meetings: list | None = None, user_name: str = "") -> dict:
         from .pa import briefing
         return briefing.build(self.store, self.settings, meetings=meetings, user_name=user_name)

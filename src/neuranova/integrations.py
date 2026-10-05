@@ -553,3 +553,26 @@ def ai_choice(settings, store: Store) -> dict:
     if current not in have:
         current = "openai" if have["openai"] and not have["claude"] else "claude"
     return {"current": current, "have": have, "locked": from_env(settings, "AI_PROVIDER")}
+
+
+DEFAULT_DEV_URL = "https://dev.neuranovaedu.com/classroom"
+
+
+def qa_config(settings, store: Store) -> dict:
+    """NeuraNova application addresses, role test accounts and workflows (Settings → Applications / Test accounts)."""
+    merged = with_integrations(settings, store)
+    s = merged.secret
+    try:
+        accounts = json.loads(s("QA_ACCOUNTS_JSON") or "{}")
+    except ValueError:
+        accounts = {}
+    return {
+        "production": s("NEURANOVA_PROD_URL"),
+        "development": s("NEURANOVA_DEV_URL") or "",
+        "login_path": s("NEURANOVA_LOGIN_PATH"),
+        "allow_prod_login": s("QA_ALLOW_PROD_LOGIN") != "0",
+        "accounts": {env: accounts.get(env, {}) for env in ("production", "development")},
+        "workflows": s("QA_WORKFLOWS"),
+        "prod_schedule": s("QA_PROD_EVERY_HOURS") or "1",
+        "dev_schedule": s("QA_DEV_DAILY_AT") or "07:30",
+    }
