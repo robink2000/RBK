@@ -3,9 +3,9 @@
 [brand]
 name = "NeuraNova"
 tagline = "Operations console"
-accent = "#4a3aa7"        # buttons, links and charts (light theme)
-accent_dark = "#9085e9"   # the same accent for dark theme
-# Your own logo instead of the built-in mark: put the file in the project and give its path.
+accent = "#6b1fa3"        # NeuraNova purple: buttons, links and charts (light theme)
+accent_dark = "#a06ad9"   # the same purple, lightened for dark theme
+# The NeuraNova logo is built in. To use a different file, put it in the project and give its path.
 # logo = "brand/logo.svg"   # .svg, .png, .jpg or .webp
 
 [workspace]

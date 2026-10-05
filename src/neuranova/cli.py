@@ -15,36 +15,54 @@ log = logging.getLogger("neuranova")
 def build_agent(settings: Settings):
     from .brain import Brain
     from .connectors.gmail import GmailConnector
-    from .connectors.outlook import OutlookConnector, access_token
+    from .connectors.outlook import OutlookConnector, access_token, token_from_cache
     from .connectors.todoist import TodoistConnector
     from .db import Store
+    from .integrations import save_values, with_integrations
     from .jobs import Agent
     from .notify import build_notifier
+    from .team import ensure_owner
+
+    store = Store(settings.db_path, settings.workspace_id, settings.owner_id)
+    base_settings = settings
+    settings = with_integrations(settings, store)  # keys and sign-ins connected in the console
+    ensure_owner(store, settings)
 
     mail = []
-    token_file = settings.secret("GMAIL_TOKEN_FILE")
-    if token_file:
+    gmail_json, token_file = settings.secret("GMAIL_TOKEN_JSON"), settings.secret("GMAIL_TOKEN_FILE")
+    if gmail_json or token_file:
         try:
-            mail.append(GmailConnector(token_file))
+            mail.append(GmailConnector(
+                token_file or None, token_json=gmail_json or None,
+                on_refresh=lambda t: save_values(store, base_settings, "gmail", {"GMAIL_TOKEN_JSON": t}, "agent")))
         except Exception as exc:
             log.warning("Gmail disabled: %s", exc)
     client_id = settings.secret("OUTLOOK_CLIENT_ID")
     if client_id:
         try:
-            token = access_token(client_id, settings.secret("OUTLOOK_TENANT") or "common",
-                                 settings.secret("OUTLOOK_TOKEN_CACHE") or "secrets/outlook_token_cache.json")
+            tenant = settings.secret("OUTLOOK_TENANT") or "common"
+            if settings.secret("OUTLOOK_TOKEN_CACHE_JSON"):
+                token, _ = token_from_cache(
+                    client_id, tenant, settings.secret("OUTLOOK_TOKEN_CACHE_JSON"),
+                    settings.secret("OUTLOOK_CLIENT_SECRET"),
+                    on_change=lambda c: save_values(store, base_settings, "outlook",
+                                                    {"OUTLOOK_TOKEN_CACHE_JSON": c}, "agent"))
+            else:
+                token = access_token(client_id, tenant,
+                                     settings.secret("OUTLOOK_TOKEN_CACHE") or "secrets/outlook_token_cache.json")
             mail.append(OutlookConnector(token))
         except Exception as exc:
             log.warning("Outlook disabled: %s", exc)
 
+    import anthropic
+
     todoist_token = settings.secret("TODOIST_API_TOKEN")
-    store = Store(settings.db_path, settings.workspace_id, settings.owner_id)
-    from .team import ensure_owner
-    ensure_owner(store, settings)
+    api_key = settings.secret("ANTHROPIC_API_KEY")
     return Agent(
         settings=settings,
         store=store,
-        brain=Brain(settings.model, settings.goals, tone=settings.reply_tone, signature=settings.reply_signature),
+        brain=Brain(settings.model, settings.goals, client=anthropic.Anthropic(api_key=api_key or None),
+                    tone=settings.reply_tone, signature=settings.reply_signature),
         notifier=build_notifier(settings, store),
         mail=mail,
         todoist=TodoistConnector(todoist_token) if todoist_token else None,
@@ -56,8 +74,11 @@ def run_forever(settings: Settings) -> None:
     from apscheduler.schedulers.background import BackgroundScheduler
     from apscheduler.schedulers.blocking import BlockingScheduler
 
-    webhook = bool(settings.secret("WHATSAPP_VERIFY_TOKEN"))
-    if webhook and not settings.secret("WHATSAPP_APP_SECRET"):
+    from .db import Store
+    from .integrations import with_integrations
+    settings_now = with_integrations(settings, Store(settings.db_path, settings.workspace_id, settings.owner_id))
+    webhook = bool(settings_now.secret("WHATSAPP_VERIFY_TOKEN"))
+    if webhook and not settings_now.secret("WHATSAPP_APP_SECRET"):
         raise SystemExit("WHATSAPP_APP_SECRET is required when the webhook is enabled (see docs/SETUP.md)")
     dashboard = bool(settings.secret("DASHBOARD_PASSWORD"))
     if dashboard and len(settings.secret("DASHBOARD_SECRET")) < 32:
@@ -82,6 +103,16 @@ def run_forever(settings: Settings) -> None:
                   max_instances=1, coalesce=True)
     sched.add_job(job("team_reminders"), "interval", minutes=settings.task_reminder_minutes, id="team",
                   max_instances=1, coalesce=True)
+    def integrations_health():
+        try:
+            from .integrations import health_check
+            agent = build_agent(settings)
+            health_check(settings, agent.store, agent.notifier.send)
+        except Exception:
+            log.exception("Integration health check failed")
+
+    sched.add_job(integrations_health, "cron", hour=max(settings.morning_brief.hour - 1, 0), minute=5,
+                  id="integrations", max_instances=1, coalesce=True)
     sched.add_job(job("morning_brief"), "cron", hour=settings.morning_brief.hour,
                   minute=settings.morning_brief.minute, id="brief", max_instances=1, coalesce=True)
     sched.add_job(job("weekly_report"), "cron", day_of_week=settings.weekly_report_day,

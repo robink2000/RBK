@@ -19,6 +19,26 @@ The first start takes about a minute while it sets up. Your browser then opens *
 
 Everything you see is sample data, kept in its own file (`data/demo.db`). Nothing is sent anywhere: "sending" a draft only marks it as sent inside the demo. Press **Ctrl+C** in the window to stop it. If port 8080 is busy, use `--port 8090`.
 
+## Connect your accounts
+
+Sign in to the console and open **Integrations**. Each service has a card:
+
+| Service | How you connect |
+|---|---|
+| Claude | Paste an API key |
+| Gmail | Paste your Google app's client ID and secret, then press **Connect with Google** |
+| Outlook / Microsoft 365 | Paste your Microsoft app ID, then press **Connect with Microsoft** |
+| Todoist | Paste your API token |
+| WhatsApp | Fill in the Meta details, then **Send me a test message** |
+
+Every card shows:
+- its status: **Connected**, **Needs attention** or **Not connected**
+- which account it's connected as, and when it was last checked
+- step-by-step setup instructions
+- the exact redirect or webhook address to copy into Google, Microsoft or Meta
+
+Keys and sign-ins are stored **encrypted** on your server, and the page never shows them again (only the last 4 characters). Every morning the agent re-tests each connection and sends you a WhatsApp alert if one stops working, for example when Google's sign-in expires. A value in `.env` still overrides the page, if you prefer files.
+
 ## What it does
 
 | Job | When | What you get on WhatsApp |
@@ -166,7 +186,8 @@ src/neuranova/
   dashboard.py      web dashboard (login, goal cards, charts, drafts, tasks, events)
   charts.py         server-rendered SVG charts
   team.py           people, invites, roles, passwords, team task rules
-  templates.py      dashboard HTML, NeuraNova theme and logo
+  templates.py      dashboard HTML and the NeuraNova theme
+  static/           the NeuraNova logo
   demo.py           `neuranova demo`: the console with sample data, offline
   server.py         web app: WhatsApp webhook + dashboard
   sla.py            business-hours deadline arithmetic
@@ -178,18 +199,22 @@ tests/              pytest suite (no network or API keys needed)
 
 ## Your brand
 
-The console uses the NeuraNova theme: a violet accent, a gold "nova" star logo, and light and dark modes. To change it, edit `[brand]` in `neuranova.toml`:
+The console uses the NeuraNova logo and colors from the NeuraNova Classroom app:
+- the brain-"N" logo appears in the header, on the sign-in page, in the browser tab, and as the home-screen icon
+- the purple of the logo's "N" is used for buttons, links and charts
+- the logo's orange-to-blue gradient runs as a thin strip across the top of every page
+- light and dark modes are both supported
+
+To change any of it, edit `[brand]` in `neuranova.toml`:
 
 ```toml
 [brand]
 name = "NeuraNova"
 tagline = "Operations console"
-accent = "#4a3aa7"        # light theme
-accent_dark = "#9085e9"   # dark theme
-logo = "brand/logo.svg"   # your own logo (.svg, .png, .jpg or .webp)
+accent = "#6b1fa3"        # light theme
+accent_dark = "#a06ad9"   # dark theme
+logo = "my-logo.png"      # optional: replace the built-in logo (.svg, .png, .jpg or .webp)
 ```
-
-The built-in mark is also saved as `brand/neuranova-mark.svg` for slides, email signatures and so on.
 
 ## Safety
 

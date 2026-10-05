@@ -11,20 +11,21 @@ BASE = """<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{ brand.name }}</title>
 <link rel="manifest" href="/manifest.webmanifest">
-<link rel="icon" href="{{ brand.logo_url or '/icon.svg' }}">
+<link rel="icon" href="/brand/logo">
+<link rel="apple-touch-icon" href="/brand/logo">
 <meta name="theme-color" content="{{ brand.accent }}">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <style>
-/* NeuraNova: a quiet violet-tinted workspace; the brand shows in the header mark,
-   the violet accent and the gold "nova" spark. Everything else stays calm for scanning. */
+/* NeuraNova: calm, lightly violet-tinted surfaces for scanning; the brand lives in the logo, the
+   purple accent (taken from the logo's "N") and the logo's orange-to-blue gradient as a strip on top. */
 :root {
   color-scheme: light;
-  --page: #f6f5fb; --surface: #ffffff; --ink: #15122b; --ink-2: #4b4862; --muted: #85829b;
-  --grid: #e5e3f0; --axis: #c8c5d9; --border: rgba(21,18,43,0.10);
+  --page: #f7f5fa; --surface: #ffffff; --ink: #1a1426; --ink-2: #4f4760; --muted: #877f96;
+  --grid: #e8e4ef; --axis: #cbc4d8; --border: rgba(26,20,38,0.10);
   --accent: {{ brand.accent }}; --accent-ink: #ffffff; --series-1: {{ brand.accent }};
-  --spark: #eda100; --mark-bg: #1d1640;
+  --brand-gradient: linear-gradient(90deg, #ee6e1c, #f04818 18%, #b43c46 34%, #a50f81 50%, #780090 66%, #2d5baf 84%, #3683c2);
   --good: #0ca30c; --good-ink: #006300; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b;
   --font-display: "Sora", "Segoe UI", system-ui, sans-serif;
   --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -32,25 +33,26 @@ BASE = """<!doctype html>
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --page: #0e0c1a; --surface: #17142a; --ink: #f4f3fb; --ink-2: #c4c1d9; --muted: #8d8aa6;
-    --grid: #2a2640; --axis: #3a3655; --border: rgba(244,243,251,0.10);
-    --accent: {{ brand.accent_dark }}; --accent-ink: #0e0c1a; --series-1: {{ brand.accent_dark }};
-    --spark: #f5b83d; --mark-bg: #2a2150; --good-ink: #0ca30c;
+    --page: #110d19; --surface: #1a1426; --ink: #f5f2fa; --ink-2: #c9c1d8; --muted: #8f87a0;
+    --grid: #2d2639; --axis: #3d3550; --border: rgba(245,242,250,0.10);
+    --accent: {{ brand.accent_dark }}; --accent-ink: #110d19; --series-1: {{ brand.accent_dark }};
+    --good-ink: #0ca30c;
   }
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --page: #0e0c1a; --surface: #17142a; --ink: #f4f3fb; --ink-2: #c4c1d9; --muted: #8d8aa6;
-  --grid: #2a2640; --axis: #3a3655; --border: rgba(244,243,251,0.10);
-  --accent: {{ brand.accent_dark }}; --accent-ink: #0e0c1a; --series-1: {{ brand.accent_dark }};
-  --spark: #f5b83d; --mark-bg: #2a2150; --good-ink: #0ca30c;
+  --page: #110d19; --surface: #1a1426; --ink: #f5f2fa; --ink-2: #c9c1d8; --muted: #8f87a0;
+  --grid: #2d2639; --axis: #3d3550; --border: rgba(245,242,250,0.10);
+  --accent: {{ brand.accent_dark }}; --accent-ink: #110d19; --series-1: {{ brand.accent_dark }};
+  --good-ink: #0ca30c;
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--page); color: var(--ink); font: 15px/1.5 var(--font-body); }
 h1, h2, .hero, .brand-name { font-family: var(--font-display); text-wrap: balance; }
 h2 { letter-spacing: -0.005em; }
 .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--ink); }
-.brand svg, .brand img { width: 36px; height: 36px; flex: none; border-radius: 10px; }
+.brand img { width: 40px; height: 40px; flex: none; object-fit: contain; }
+.brand-strip { height: 4px; background: var(--brand-gradient); }
 .brand-name { font-size: 20px; font-weight: 700; letter-spacing: -0.01em; line-height: 1.1; }
 .brand-name .nova { color: var(--accent); }
 .brand-tag { color: var(--muted); font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; }
@@ -123,9 +125,40 @@ nav.top a.on { background: color-mix(in srgb, var(--accent) 14%, transparent); c
 .form-grid input, .form-grid select { width: 100%; }
 .copy { width: 100%; font-family: ui-monospace, monospace; font-size: 13px; }
 .muted-row td { color: var(--muted); }
+/* integrations */
+.int-summary { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.meter { flex: 1 1 220px; height: 8px; border-radius: 999px; background: var(--grid); overflow: hidden; min-width: 0; }
+.meter span { display: block; height: 100%; background: var(--brand-gradient); border-radius: 999px; }
+.int-group { font-family: var(--font-display); font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase;
+             color: var(--muted); margin: 24px 0 8px; }
+.int-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr)); gap: 16px; }
+.int-card { display: flex; flex-direction: column; gap: 12px; margin: 0; }
+.int-head { display: flex; gap: 12px; align-items: flex-start; }
+.int-badge { width: 40px; height: 40px; border-radius: 10px; flex: none; display: grid; place-items: center;
+             font-family: var(--font-display); font-weight: 700; color: var(--accent);
+             background: color-mix(in srgb, var(--accent) 12%, var(--surface)); border: 1px solid var(--border); }
+.int-head h2 { margin: 0; }
+.int-head p { margin: 2px 0 0; color: var(--ink-2); font-size: 14px; }
+.int-head .pill { margin-left: auto; white-space: nowrap; }
+.s-ready .dot { background: var(--accent); }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--page); border: 1px solid var(--border); color: var(--ink-2); }
+.int-status { font-size: 14px; border-radius: 8px; padding: 8px 10px; background: var(--page); }
+.int-status.error { background: color-mix(in srgb, var(--critical) 10%, var(--surface)); }
+.int-fields { display: grid; gap: 10px; }
+.int-fields label { display: grid; gap: 4px; font-size: 14px; font-weight: 550; }
+.int-fields input { width: 100%; font-weight: 400; }
+input::placeholder { color: var(--muted); font-weight: 400; opacity: 1; }
+.setup-nudge { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: space-between; }
+.int-fields small { color: var(--muted); font-weight: 400; }
+.locked { color: var(--muted); font-size: 13px; font-weight: 400; }
+ol.steps { margin: 6px 0 0 18px; padding: 0; display: grid; gap: 4px; font-size: 14px; color: var(--ink-2); }
+.copyrow { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
+.copyrow input { flex: 1 1 auto; min-width: 0; font-family: ui-monospace, monospace; font-size: 12px; }
+.ext-links { display: flex; gap: 12px; flex-wrap: wrap; font-size: 14px; margin-top: 8px; }
 </style>
 </head>
-<body><main>{% block body %}{% endblock %}</main></body>
+<body><div class="brand-strip" aria-hidden="true"></div><main>{% block body %}{% endblock %}</main></body>
 </html>"""
 
 LOGIN = """{% extends "base" %}{% from "nav" import brand_logo, brand_wordmark with context %}{% block body %}
@@ -143,7 +176,7 @@ LOGIN = """{% extends "base" %}{% from "nav" import brand_logo, brand_wordmark w
 </div>
 {% endblock %}"""
 
-NAV = """{% macro brand_logo() %}{% if brand.logo_url %}<img src="{{ brand.logo_url }}" alt="">{% else %}""" + "{{ mark|safe }}" + """{% endif %}{% endmacro %}
+NAV = """{% macro brand_logo() %}<img src="/brand/logo" alt="{{ brand.name }} logo" width="40" height="40">{% endmacro %}
 {% macro brand_wordmark() %}{% if brand.name == 'NeuraNova' %}Neura<span class="nova">Nova</span>{% else %}{{ brand.name }}{% endif %}{% endmacro %}
 {% macro top(page, user, csrf, today) %}
 <header>
@@ -152,6 +185,7 @@ NAV = """{% macro brand_logo() %}{% if brand.logo_url %}<img src="{{ brand.logo_
   <nav class="top" aria-label="Main">
     <a href="/" class="{{ 'on' if page == 'home' else '' }}">Home</a>
     <a href="/team" class="{{ 'on' if page == 'team' else '' }}">Team</a>
+    {% if user.id == owner_id %}<a href="/integrations" class="{{ 'on' if page == 'integrations' else '' }}">Integrations</a>{% endif %}
     <span class="who">{{ user.name }} · {{ user.role }}</span>
     <form class="inline" method="post" action="/logout"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link" type="submit">Sign out</button></form>
   </nav>
@@ -218,6 +252,13 @@ DASHBOARD = """{% extends "base" %}{% from "chart" import chart %}{% from "nav" 
 {{ top('home', me, csrf, today) }}
 {% if msg %}<div class="flash" role="status">{{ msg }}</div>{% endif %}
 {% if not is_owner %}{{ mytasks() }}{% endif %}
+{% if is_owner and setup and setup.connected < setup.total %}
+<section class="card setup-nudge">
+  <div><h2 style="margin:0">Finish connecting your accounts</h2>
+    <div class="sub">{{ setup.connected }} of {{ setup.total }} connected{% if setup.missing %}. Still to do: {{ setup.missing|join(', ') }}{% endif %}.</div></div>
+  <a class="btn" href="/integrations" style="text-decoration:none">Open Integrations</a>
+</section>
+{% endif %}
 <div class="tabs row">{% for d in [7, 30, 90] %}<a href="/?days={{ d }}" class="{{ 'on' if d == days else '' }}">{{ d }} days</a> {% endfor %}</div>
 
 <div class="grid3 row">
@@ -338,25 +379,11 @@ DASHBOARD = """{% extends "base" %}{% from "chart" import chart %}{% from "nav" 
 {% endif %}
 {% endblock %}"""
 
-# The NeuraNova mark: a four-point "nova" star at the centre of a ring of connected nodes.
-MARK = """<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="NeuraNova logo">
-<rect width="64" height="64" rx="16" fill="var(--mark-bg, #1d1640)"/>
-<circle cx="32" cy="32" r="19" fill="none" stroke="#9085e9" stroke-width="1.6" opacity="0.55"/>
-<g stroke="#9085e9" stroke-width="1.4" opacity="0.8"><line x1="32" y1="32" x2="45.4" y2="18.6"/><line x1="32" y1="32" x2="15.6" y2="41.5"/><line x1="32" y1="32" x2="44" y2="46.6"/></g>
-<g fill="#b9b0ff"><circle cx="45.4" cy="18.6" r="3"/><circle cx="15.6" cy="41.5" r="3"/><circle cx="44" cy="46.6" r="2.4"/></g>
-<path d="M32 13.5C33.6 25.6 38.4 30.4 50.5 32C38.4 33.6 33.6 38.4 32 50.5C30.4 38.4 25.6 33.6 13.5 32C25.6 30.4 30.4 25.6 32 13.5Z" fill="var(--spark, #f5b83d)"/>
-<circle cx="32" cy="32" r="3.2" fill="#ffffff"/>
-</svg>"""
-
-# Same mark with fixed colors, for the browser tab and home-screen icon (no page CSS there).
-ICON = MARK.replace("var(--mark-bg, #1d1640)", "#1d1640").replace("var(--spark, #f5b83d)", "#f5b83d")
-
-
 def manifest(brand) -> dict:
     return {
         "name": brand["name"], "short_name": brand["name"], "start_url": "/", "display": "standalone",
-        "background_color": "#0e0c1a", "theme_color": brand["accent"],
-        "icons": [{"src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"}],
+        "background_color": "#ffffff", "theme_color": brand["accent"],
+        "icons": [{"src": "/brand/logo", "sizes": "256x256", "type": "image/png", "purpose": "any"}],
     }
 
 
@@ -474,11 +501,104 @@ TEAM = """{% extends "base" %}{% from "nav" import top, task_row with context %}
 {% endif %}
 {% endblock %}"""
 
+INTEGRATIONS = """{% extends "base" %}{% from "nav" import top with context %}{% block body %}
+{{ top('integrations', me, csrf, today) }}
+{% if msg %}<div class="flash" role="status">{{ msg }}</div>{% endif %}
+
+<section class="card">
+  <h2>Integrations</h2>
+  <div class="int-summary">
+    <strong>{{ connected }} of {{ cards|length }} connected</strong>
+    <div class="meter" role="img" aria-label="{{ connected }} of {{ cards|length }} connected"><span style="width: {{ (100 * connected / cards|length)|round|int }}%"></span></div>
+    <form class="inline" method="post" action="/integrations/test-all"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit">Test all</button></form>
+  </div>
+  <p class="sub" style="margin-bottom:0">Keys and sign-ins are stored encrypted on your own server and are checked every morning. If one stops working, you get a WhatsApp alert.</p>
+</section>
+
+{% for group in ['AI', 'Email', 'Tasks', 'Messaging'] %}
+<div class="int-group">{{ group }}</div>
+<div class="int-grid">
+{% for c in cards if c.category == group %}
+  <section class="card int-card" id="{{ c.name }}">
+    <div class="int-head">
+      <div class="int-badge" aria-hidden="true">{{ c.title[0] }}</div>
+      <div style="min-width:0"><h2>{{ c.title }}</h2><p>{{ c.summary }}</p></div>
+      {% set st = {'connected': ('good', '✓', 'Connected'), 'error': ('critical', '✕', 'Needs attention'),
+                   'ready': ('ready', '…', 'Not tested'), 'not_connected': ('none', '–', 'Not connected')}[c.status] %}
+      <span class="pill s-{{ st[0] }}"><span class="dot" aria-hidden="true">{{ st[1] }}</span>{{ st[2] }}</span>
+    </div>
+    <div class="chips" aria-label="Unlocks">{% for u in c.unlocks %}<span class="chip">{{ u }}</span>{% endfor %}</div>
+
+    {% if c.message or c.account %}
+    <div class="int-status {{ 'error' if c.status == 'error' else '' }}">
+      {% if c.account %}<strong>{{ c.account }}</strong> · {% endif %}{{ c.message }}
+      {% if c.checked %}<span class="meta"> · checked {{ c.checked }}</span>{% endif %}
+    </div>
+    {% endif %}
+
+    <form class="int-fields" method="post" action="/integrations/{{ c.name }}/save" autocomplete="off">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      {% for f in c.fields %}
+      <label for="{{ c.name }}-{{ f.key }}">{{ f.label }}{% if not f.required %} <small>(optional)</small>{% endif %}
+        {% if f.env %}
+          <span class="locked">Set in the .env file{% if not f.secret %}: {{ f.shown }}{% endif %}</span>
+        {% else %}
+          <input id="{{ c.name }}-{{ f.key }}" name="{{ f.key }}" {{ 'type=password' if f.secret else '' }}
+                 value="{{ '' if f.secret else f.shown }}"
+                 placeholder="{{ ('Saved ' ~ f.shown ~ ' - leave blank to keep') if (f.secret and f.has_value) else f.placeholder }}">
+        {% endif %}
+        {% if f.help %}<small>{{ f.help }}</small>{% endif %}
+      </label>
+      {% endfor %}
+      <div class="actions">
+        {% if c.fields %}<button class="{{ '' if c.oauth else 'primary' }}" type="submit">Save &amp; test</button>{% endif %}
+        {% if c.oauth %}
+        <button class="primary" type="submit" formaction="/integrations/{{ c.oauth }}/connect">{{ 'Reconnect' if c.signed_in else 'Connect' }} with {{ 'Google' if c.oauth == 'google' else 'Microsoft' }}</button>
+        {% endif %}
+        {% if c.configured %}<button type="submit" formaction="/integrations/{{ c.name }}/test">Test</button>{% endif %}
+        {% if c.name == 'whatsapp' and c.configured %}<button type="submit" formaction="/integrations/whatsapp/send-test">Send me a test message</button>{% endif %}
+        {% if c.configured or c.signed_in %}<button class="link" type="submit" formaction="/integrations/{{ c.name }}/disconnect">Disconnect</button>{% endif %}
+      </div>
+    </form>
+
+    <details {{ 'open' if c.status == 'not_connected' else '' }}>
+      <summary>How to set up {{ c.title }}</summary>
+      <ol class="steps">{% for step in c.steps %}<li>{{ step }}</li>{% endfor %}</ol>
+      {% if c.redirect_uri %}
+      <div class="copyrow"><input readonly value="{{ c.redirect_uri }}" aria-label="Redirect URI" onclick="this.select()"><button type="button" data-copy="{{ c.redirect_uri }}">Copy</button></div>
+      <small class="meta">Redirect URI: paste this into the {{ 'Google' if c.oauth == 'google' else 'Microsoft' }} app settings.</small>
+      {% endif %}
+      {% if c.webhook_url %}
+      <div class="copyrow"><input readonly value="{{ c.webhook_url }}" aria-label="Webhook URL" onclick="this.select()"><button type="button" data-copy="{{ c.webhook_url }}">Copy</button></div>
+      <small class="meta">Webhook URL for Meta (must be a public https address).</small>
+      {% if c.verify_token %}<div class="copyrow"><input readonly value="{{ c.verify_token }}" aria-label="Verify token" onclick="this.select()"><button type="button" data-copy="{{ c.verify_token }}">Copy</button></div>
+      <small class="meta">Verify token for Meta.</small>{% endif %}
+      {% endif %}
+      <div class="ext-links">{% for label, url in c.links %}<a href="{{ url }}" target="_blank" rel="noopener">{{ label }} ↗</a>{% endfor %}</div>
+    </details>
+  </section>
+{% endfor %}
+</div>
+{% endfor %}
+<script>
+document.addEventListener('click', function (e) {
+  var b = e.target.closest('[data-copy]'); if (!b) return;
+  var done = function () { var t = b.textContent; b.textContent = 'Copied'; setTimeout(function () { b.textContent = t; }, 1500); };
+  if (navigator.clipboard) navigator.clipboard.writeText(b.dataset.copy).then(done, function () { b.previousElementSibling.select(); });
+  else b.previousElementSibling.select();
+});
+</script>
+{% endblock %}"""
+
+RETURN = """<!doctype html><html><head><meta charset="utf-8"><title>Connecting...</title>
+<meta http-equiv="refresh" content="0;url={{ url }}"></head>
+<body style="font-family: system-ui; padding: 24px">Finishing sign-in... <a href="{{ url }}">Continue</a></body></html>"""
+
+
 env = Environment(
     loader=DictLoader({"base": BASE, "login": LOGIN, "dashboard": DASHBOARD, "chart": CHART, "nav": NAV,
-                       "join": JOIN, "link": LINK, "team": TEAM}),
+                       "join": JOIN, "link": LINK, "team": TEAM, "integrations": INTEGRATIONS, "return": RETURN}),
     autoescape=select_autoescape(default=True, default_for_string=True),
 )
-env.globals["mark"] = MARK
-env.globals["brand"] = {"name": "NeuraNova", "tagline": "Operations console", "accent": "#4a3aa7",
-                        "accent_dark": "#9085e9", "logo_url": ""}
+env.globals["brand"] = {"name": "NeuraNova", "tagline": "Operations console", "accent": "#6b1fa3",
+                        "accent_dark": "#a06ad9"}

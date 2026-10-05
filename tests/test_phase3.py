@@ -206,7 +206,8 @@ def test_demo_builds_and_signs_in(tmp_path):
                        follow_redirects=False).status_code == 303
     page = client.get("/").text
     assert 'Neura<span class="nova">Nova</span>' in page and "Drafts to approve" in page
-    assert client.get("/icon.svg").headers["content-type"].startswith("image/svg")
+    logo = client.get("/brand/logo")
+    assert logo.headers["content-type"] == "image/png" and logo.content.startswith(b"\x89PNG")
 
 
 def test_custom_brand_logo_and_safe_colors(tmp_path):
@@ -217,7 +218,7 @@ def test_custom_brand_logo_and_safe_colors(tmp_path):
     env = {"DASHBOARD_PASSWORD": "pw-long-enough", "DASHBOARD_SECRET": "s" * 40, "DASHBOARD_INSECURE_COOKIE": "1",
            "NEURANOVA_DB": ":memory:"}
     settings = load_settings(cfg, env=env)
-    assert settings.brand["accent"] == "#4a3aa7"                    # unsafe value rejected
+    assert settings.brand["accent"] == "#6b1fa3"                    # unsafe value rejected
     store = Store(":memory:", settings.workspace_id, settings.owner_id)
     client = TestClient(create_app(settings, lambda: SimpleNamespace(store=store), store=store))
     login_page = client.get("/login").text

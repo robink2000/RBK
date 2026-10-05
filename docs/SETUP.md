@@ -1,5 +1,7 @@
 # Setup guide
 
+> **Easiest way:** run `neuranova run` with the dashboard turned on (section 5d), sign in, and open **Integrations**. You enter every key and sign-in on that page, with the steps shown on each card. The sections below explain the same steps in more detail, and the `.env` file still works if you prefer it.
+
 > **Upgrading from Phase 1?** The agent now needs permission to *send* replies you approve. Run `neuranova auth gmail` and `neuranova auth outlook` again (add `Mail.Send` to the Outlook app first), then follow section 5b for the webhook.
 
 Do these once. Each account is optional: if one is left blank in `.env`, that part is simply skipped.
