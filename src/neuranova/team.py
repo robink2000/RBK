@@ -185,11 +185,14 @@ def parse_due(value: str | None, tz, end_of_day: time) -> datetime | None:
 
 
 def can_change(user, task) -> bool:
-    return user["role"] == "admin" or user["id"] in (task["assignee_id"], task["created_by"])
+    owner = task["owner_id"] if "owner_id" in task.keys() else task["assignee_id"]
+    return user["role"] == "admin" or user["id"] in (owner, task["created_by"])
 
 
 def format_task(task, tz) -> str:
     due = row_dt(task["due_at"])
     when = f" · due {due.astimezone(tz).strftime('%a %d %b %H:%M')}" if due else ""
     flag = " · BLOCKED" if task["status"] == "blocked" else ""
-    return f"#{task['id']} {task['title']} → {task['assignee_name']}{when}{flag}"
+    keys = task.keys()
+    who = (task["owner_name"] if "owner_name" in keys else task["assignee_name"]) or "Unassigned"
+    return f"#{task['id']} {task['title']} → {who}{when}{flag}"

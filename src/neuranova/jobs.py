@@ -281,7 +281,7 @@ class Agent:
         task = self._task_for_change(by_user, task_id)
         if task["status"] == "done":
             return f"#{task_id} is already done."
-        self.store.update_team_task(task_id, status="done", done_at=self._now(), blocked_reason="")
+        self.store.update_team_task(task_id, actor=by_user["id"], status="done", done_at=self._now(), blocked_reason="")
         self.store.log("team_task_done", by=by_user["id"], task_id=task_id)
         creator = self.store.user(task["created_by"])
         if creator and creator["id"] != by_user["id"]:
@@ -292,7 +292,7 @@ class Agent:
         task = self._task_for_change(by_user, task_id)
         if not reason.strip():
             raise TeamError("Say what's blocking it, e.g. 'blocked 12 waiting for client logo'.")
-        self.store.update_team_task(task_id, status="blocked", blocked_reason=reason.strip()[:300])
+        self.store.update_team_task(task_id, actor=by_user["id"], status="blocked", blocked_reason=reason.strip()[:300])
         self.store.log("team_task_blocked", by=by_user["id"], task_id=task_id, reason=reason[:200])
         msg = f"🚧 {by_user['name']} is blocked on #{task_id} {task['title']}\nReason: {reason.strip()}"
         self.notify_admins(msg, except_id=by_user["id"])
@@ -303,13 +303,14 @@ class Agent:
 
     def reopen_team_task(self, by_user, task_id: int) -> str:
         self._task_for_change(by_user, task_id)
-        self.store.update_team_task(task_id, status="open", blocked_reason="", done_at=None)
+        self.store.update_team_task(task_id, actor=by_user["id"], status="open", blocked_reason="", done_at=None)
         self.store.log("team_task_reopened", by=by_user["id"], task_id=task_id)
         return f"Reopened #{task_id}."
 
     def reassign_team_task(self, by_user, task_id: int, assignee) -> str:
         task = self._task_for_change(by_user, task_id)
-        self.store.update_team_task(task_id, assignee_id=assignee["id"], reminded=0, overdue_alerted=0)
+        self.store.update_team_task(task_id, actor=by_user["id"], assignee_id=assignee["id"], reminded=0,
+                                    overdue_alerted=0)
         self.store.log("team_task_reassigned", by=by_user["id"], task_id=task_id, to=assignee["id"])
         if assignee["id"] != by_user["id"]:
             self.notify_user(assignee, f"📌 {by_user['name']} handed you #{task_id} {task['title']}",

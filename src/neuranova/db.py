@@ -520,64 +520,75 @@ class Store:
                           (token_hash, self.workspace_id))
         self.conn.commit()
 
-    # --- team: tasks ---------------------------------------------------------------
+    # --- team: tasks (stored as PA work items; these keep the original team-board interface) --------------
+
+    @property
+    def pa(self):
+        if getattr(self, "_pa", None) is None:
+            from .pa.store import PAStore
+            self._pa = PAStore(self)
+        return self._pa
+
+    @staticmethod
+    def _legacy_task(row) -> dict | None:
+        if row is None:
+            return None
+        import json as _json
+        data = _json.loads(row["data"] or "{}")
+        status = {"closed": "done", "verified": "done", "blocked": "blocked"}.get(row["status"], "open")
+        return {**dict(row), "assignee_id": row["owner_id"], "assignee_name": row["owner_name"] or "Unassigned",
+                "assignee_whatsapp": row["owner_whatsapp"] or "", "notes": row["description"], "status": status,
+                "pa_status": row["status"], "blocked_reason": data.get("blocked_reason", ""),
+                "done_at": row["completed_at"],
+                "email_id": int(row["source_ref"]) if row["source"] == "email" and str(row["source_ref"]).isdigit() else None}
 
     def add_team_task(self, title: str, assignee_id: str, created_by: str, due_at: datetime | None = None,
-                      notes: str = "", email_id: int | None = None) -> int:
-        cur = self.conn.execute(
-            """INSERT INTO team_tasks (workspace_id, title, notes, assignee_id, created_by, due_at, email_id, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (self.workspace_id, title.strip(), notes.strip(), assignee_id, created_by, _iso(due_at), email_id,
-             _iso(datetime.now(timezone.utc))),
-        )
-        self.conn.commit()
-        return cur.lastrowid
+                      notes: str = "", email_id: int | None = None, **extra) -> int:
+        return self.pa.create_item(created_by, kind=extra.pop("kind", "task"), title=title.strip(),
+                                   description=notes.strip(), owner_id=assignee_id, due_at=due_at,
+                                   source="email" if email_id else extra.pop("source", "manual"),
+                                   source_ref=str(email_id or extra.pop("source_ref", "")), **extra)
 
-    def team_task(self, task_id: int) -> sqlite3.Row | None:
-        return self.conn.execute(
-            """SELECT t.*, u.name AS assignee_name, u.whatsapp AS assignee_whatsapp
-               FROM team_tasks t JOIN users u ON u.id = t.assignee_id
-               WHERE t.id = ? AND t.workspace_id = ?""",
-            (task_id, self.workspace_id),
-        ).fetchone()
+    def team_task(self, task_id: int) -> dict | None:
+        return self._legacy_task(self.pa.item(task_id))
 
     def team_tasks(self, status: str | None = "open", assignee_id: str | None = None,
-                   limit: int = 200) -> list[sqlite3.Row]:
-        """status: 'open' means open or blocked; 'done'; None for all."""
-        q = """SELECT t.*, u.name AS assignee_name, u.whatsapp AS assignee_whatsapp
-               FROM team_tasks t JOIN users u ON u.id = t.assignee_id WHERE t.workspace_id = ?"""
-        args: list = [self.workspace_id]
-        if status == "open":
-            q += " AND t.status IN ('open', 'blocked')"
-        elif status:
-            q += " AND t.status = ?"
-            args.append(status)
-        if assignee_id:
-            q += " AND t.assignee_id = ?"
-            args.append(assignee_id)
-        q += " ORDER BY t.status = 'done', t.due_at IS NULL, t.due_at, t.id LIMIT ?"
-        return self.conn.execute(q, (*args, limit)).fetchall()
+                   limit: int = 200) -> list[dict]:
+        """status: 'open' means any active status; 'blocked'; 'done'; None for all."""
+        pa_status = {"open": "active", "blocked": "blocked", "done": ("closed", "verified"), None: None}[status]
+        rows = self.pa.items(status=pa_status, owner_id=assignee_id, limit=limit)
+        rows = [r for r in rows if r["owner_id"]]
+        return [self._legacy_task(r) for r in rows]
 
-    def update_team_task(self, task_id: int, **fields) -> bool:
-        allowed = {"title", "notes", "assignee_id", "due_at", "status", "blocked_reason", "done_at",
-                   "reminded", "overdue_alerted"}
-        cols = [k for k in fields if k in allowed]
-        if not cols:
+    def update_team_task(self, task_id: int, actor: str = "agent", **fields) -> bool:
+        current = self.pa.item(task_id)
+        if current is None:
             return False
-        values = [_iso(v) if isinstance(v, datetime) else v for v in (fields[c] for c in cols)]
-        cur = self.conn.execute(
-            f"UPDATE team_tasks SET {', '.join(f'{c} = ?' for c in cols)} WHERE id = ? AND workspace_id = ?",
-            (*values, task_id, self.workspace_id),
-        )
-        self.conn.commit()
-        return cur.rowcount == 1
+        mapped = {}
+        for key, value in fields.items():
+            if key == "status":
+                mapped["status"] = {"done": "closed", "open": "open", "blocked": "blocked"}.get(value, value)
+            elif key == "assignee_id":
+                mapped["owner_id"] = value
+            elif key == "done_at":
+                mapped["completed_at"] = value
+            elif key == "notes":
+                mapped["description"] = value
+            elif key == "blocked_reason":
+                import json as _json
+                data = _json.loads(current["data"] or "{}")
+                if value:
+                    data["blocked_reason"] = value
+                else:
+                    data.pop("blocked_reason", None)
+                mapped["data"] = data
+            else:
+                mapped[key] = value
+        return self.pa.update_item(task_id, actor, **mapped)
 
-    def team_tasks_done_between(self, start: datetime, end: datetime) -> list[sqlite3.Row]:
-        return self.conn.execute(
-            """SELECT * FROM team_tasks WHERE workspace_id = ? AND status = 'done'
-               AND done_at >= ? AND done_at < ?""",
-            (self.workspace_id, _iso(start), _iso(end)),
-        ).fetchall()
+    def team_tasks_done_between(self, start: datetime, end: datetime) -> list[dict]:
+        return [self._legacy_task(self.pa.item(r["id"])) for r in self.pa.items_completed_between(start, end)
+                if r["owner_id"]]
 
     # --- integrations ------------------------------------------------------------
 
