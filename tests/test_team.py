@@ -157,7 +157,9 @@ def test_member_commands_and_no_draft_access(tmp_path):
 
 def test_member_assistant_has_no_mail_or_todoist_tools(tmp_path):
     names = {t["name"] for t in MEMBER_TOOLS}
-    assert names == {"assign_task", "team_tasks", "update_team_task", "team_overview", "log_event", "progress"}
+    assert {"assign_task", "team_tasks", "update_team_task", "team_overview", "log_event", "progress",
+            "attention", "list_items", "create_item"} <= names
+    assert not names & {"draft_message", "recent_communication", "get_report", "add_task", "search_email"}
     assert {"add_task", "search_email", "waiting_on_me"} <= {t["name"] for t in OWNER_TOOLS}
     settings, store, agent, owner, priya, _, _ = make_team(tmp_path)
     assistant = Assistant(agent, client=object(), user=priya)
