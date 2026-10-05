@@ -19,6 +19,19 @@ The first start takes about a minute while it sets up. Your browser then opens *
 
 Everything you see is sample data, kept in its own file (`data/demo.db`). Nothing is sent anywhere: "sending" a draft only marks it as sent inside the demo. Press **Ctrl+C** in the window to stop it. If port 8080 is busy, use `--port 8090`.
 
+## Use it for real on your laptop
+
+You don't need to edit any files. In the project folder:
+
+- **Windows:** double-click `scripts\start.bat`
+- **Mac / Linux:** run `./scripts/start.sh`
+
+The first time, it asks a few questions: your email, your name, a console password, your timezone, and whether it runs on this computer or a server. It saves the answers and starts the console at **http://localhost:8080**. After that, the same script just starts it. Sign in, then open **Integrations**.
+
+You can also run the steps yourself: `neuranova setup` (safe to repeat; it keeps your existing keys), then `neuranova run`.
+
+> While it runs on a laptop, alerts only go out while the laptop is on, and WhatsApp needs a server with a public `https://` address (see `docs/SETUP.md`, section 6). Claude, Gmail, Outlook and Todoist all work on the laptop.
+
 ## Connect your accounts
 
 Sign in to the console and open **Integrations**. Each service has a card:
@@ -157,9 +170,9 @@ The three goals (develop the business, give proper responses, deliver high quali
 ```bash
 python3 -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"
-cp .env.example .env            # fill in keys - see docs/SETUP.md
-neuranova auth gmail            # one-time, opens a browser
-neuranova auth outlook          # one-time, code you approve on your phone
+neuranova setup                 # your login, password and timezone (writes .env)
+neuranova run                   # then connect accounts on the Integrations page
+neuranova auth gmail            # (optional) command-line sign-in instead of the page
 neuranova test-notify           # check the WhatsApp (or console) channel
 neuranova check                 # pull and triage mail now
 neuranova brief                 # send the morning brief now
@@ -189,6 +202,8 @@ src/neuranova/
   templates.py      dashboard HTML and the NeuraNova theme
   static/           the NeuraNova logo
   demo.py           `neuranova demo`: the console with sample data, offline
+  setup_wizard.py   `neuranova setup`: creates .env in a few questions
+  integrations.py   Integrations page logic: encrypted keys, sign-in, tests, health check
   server.py         web app: WhatsApp webhook + dashboard
   sla.py            business-hours deadline arithmetic
   db.py             SQLite storage (workspace/owner on every row - team-ready)
