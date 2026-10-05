@@ -26,6 +26,20 @@ task_reminder_lead_minutes = 30
 [alerts]
 instant_high_priority = true   # WhatsApp ping for every new high-priority email
 
+[tasks]
+auto_create_from_email = true  # emails with real work (invoice, proposal...) become Todoist tasks
+
+[replies]
+draft_replies = true           # draft replies to clients/leads/partners for your approval
+# Your sign-off, exactly as it should appear at the end of every reply
+signature = """
+Best regards,
+[Your name]
+NeuraNova"""
+tone = "Warm, professional and concise. Plain English. No buzzwords."
+draft_lookback_days = 3        # don't draft for mail older than this
+max_drafts_per_run = 5
+
 [[goals]]
 name = "Develop the business"
 measure = "New leads, client follow-ups done on time, deals moving forward"

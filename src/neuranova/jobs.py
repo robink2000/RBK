@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
@@ -20,6 +22,8 @@ log = logging.getLogger(__name__)
 FIRST_RUN_LOOKBACK = timedelta(days=2)
 REPLY_LOOKBACK = timedelta(days=14)
 SLA_NONE, SLA_WARNED, SLA_BREACHED = 0, 1, 2
+TODOIST_PRIORITY = {"high": 4, "medium": 3, "low": 1}  # 4 = P1
+PLACEHOLDER = re.compile(r"\[[^\]\n]{1,80}\]")
 
 
 @dataclass
@@ -36,6 +40,12 @@ class Agent:
 
     def _fmt(self, dt: datetime) -> str:
         return dt.astimezone(self.settings.tz).strftime("%a %H:%M")
+
+    def connector(self, source: str) -> MailConnector | None:
+        return next((c for c in self.mail if c.name == source), None)
+
+    def _fmt_deadline(self, row) -> str:
+        return self._fmt(row_dt(row["reply_deadline"])) if row["reply_deadline"] else "no deadline"
 
     def _held_to_sla(self, category: str, priority: str, needs_reply: bool) -> bool:
         return needs_reply and (category in self.settings.sla_categories or priority == "high")
@@ -60,8 +70,13 @@ class Agent:
                 self.store.log("error", job="check_inbox", source=conn.name)
 
         stats["triaged"] = self.triage_pending()
+        self.store.close_drafts_for_replied()
         if self.settings.instant_high_priority:
             self.alert_high_priority()
+        if self.settings.auto_create_tasks and self.todoist:
+            stats["tasks"] = self.create_tasks()
+        if self.settings.drafts_enabled:
+            stats["drafts"] = self.draft_replies()
         self.store.log("check_inbox", **stats)
         return stats
 
@@ -98,6 +113,119 @@ class Agent:
                 self.notifier.send("\n".join(lines))
                 self.store.log("alert_high_priority", email_id=r["id"])
             self.store.mark_alerted(r["id"])
+
+    # --- email -> Todoist ----------------------------------------------------
+
+    def create_tasks(self) -> int:
+        created = 0
+        for r in self.store.tasks_to_create():
+            description = (f"From: {r['sender']}\nSubject: {r['subject']}\n{r['summary']}"
+                           + (f"\n\nOpen email: {r['link']}" if r["link"] else ""))
+            try:
+                task = self.todoist.add_task(
+                    r["task_title"], description=description, due_string=r["task_due"],
+                    priority=TODOIST_PRIORITY.get(r["priority"], 1),
+                )
+            except Exception:
+                log.exception("Could not create Todoist task for email %s", r["id"])
+                continue
+            self.store.set_task_id(r["id"], task.id)
+            self.store.log("task_created", email_id=r["id"], task_id=task.id, title=r["task_title"])
+            created += 1
+        return created
+
+    # --- reply drafts ---------------------------------------------------------
+
+    def draft_replies(self) -> int:
+        made = 0
+        since = self._now() - timedelta(days=self.settings.draft_lookback_days)
+        for r in self.store.needing_draft(since, self.settings.max_drafts_per_run):
+            conn = self.connector(r["source"])
+            if conn is None:
+                continue
+            try:
+                body = conn.fetch_body(r["external_id"])
+                draft = self.brain.draft_reply(r["sender"], r["subject"], body)
+            except Exception:
+                log.exception("Could not draft a reply for email %s", r["id"])
+                continue
+            draft_id = self.store.add_draft(r["id"], draft.reply, draft.needs_input)
+            self.store.log("draft_created", email_id=r["id"], draft_id=draft_id)
+            self.notifier.send(self.format_draft(self.store.draft(draft_id)),
+                               teaser=f"Draft #{draft_id} ready for {sender_name(r['sender'])} - "
+                                      f"{r['subject']}. Reply 'drafts' to review it.")
+            made += 1
+        return made
+
+    def format_draft(self, d) -> str:
+        email = self.store.email(d["email_id"])
+        lines = [f"✉️ Draft #{d['id']} → {sender_name(d['sender'])} ({email['category']})",
+                 f"Re: {d['subject']}"]
+        if email["reply_deadline"]:
+            lines.append(f"Reply by {self._fmt(row_dt(email['reply_deadline']))}")
+        lines += ["", d["body"], ""]
+        needs = json.loads(d["needs_input"] or "[]")
+        if needs:
+            lines += ["❓ Needs you:"] + [f"- {q}" for q in needs] + [""]
+        n = d["id"]
+        lines.append(f"Reply: send {n} · edit {n} <your text> · redo {n} <what to change> · skip {n}")
+        return "\n".join(lines)
+
+    def send_draft(self, draft_id: int) -> str:
+        d = self.store.draft(draft_id)
+        if d is None:
+            return f"No draft #{draft_id}."
+        if d["status"] != "pending":
+            return f"Draft #{draft_id} is already {d['status']}."
+        if gaps := PLACEHOLDER.findall(d["body"]):
+            return (f"Draft #{draft_id} still has blanks: {', '.join(gaps)}\n"
+                    f"Fill them with: edit {draft_id} <full reply>  or  redo {draft_id} <the details>")
+        conn = self.connector(d["source"])
+        if conn is None:
+            return f"{d['source']} is not connected, so draft #{draft_id} can't be sent."
+        if not self.store.transition_draft(draft_id, "pending", "sending"):
+            return f"Draft #{draft_id} is already being handled."
+        try:
+            conn.send_reply(d["external_id"], d["body"])
+        except Exception as exc:
+            log.exception("Sending draft %s failed", draft_id)
+            self.store.transition_draft(draft_id, "sending", "pending", error=str(exc)[:500])
+            return f"❌ Sending draft #{draft_id} failed: {str(exc)[:200]}\nIt is still pending; try again or reply from your mailbox."
+        self.store.transition_draft(draft_id, "sending", "sent")
+        self.store.mark_replied(d["source"], d["thread_id"], self._now())
+        self.store.log("draft_sent", draft_id=draft_id, email_id=d["email_id"])
+        return f"✅ Sent reply to {sender_name(d['sender'])} (draft #{draft_id})."
+
+    def skip_draft(self, draft_id: int) -> str:
+        if self.store.transition_draft(draft_id, "pending", "skipped"):
+            self.store.log("draft_skipped", draft_id=draft_id)
+            return f"Skipped draft #{draft_id}. The reply deadline still applies if you answer yourself."
+        d = self.store.draft(draft_id)
+        return f"No draft #{draft_id}." if d is None else f"Draft #{draft_id} is already {d['status']}."
+
+    def edit_draft(self, draft_id: int, text: str) -> str:
+        if not text.strip():
+            return f"Send the full new reply after the number, e.g. edit {draft_id} Hi Asha, ..."
+        if not self.store.update_draft_body(draft_id, text.strip(), []):
+            d = self.store.draft(draft_id)
+            return f"No draft #{draft_id}." if d is None else f"Draft #{draft_id} is already {d['status']}."
+        self.store.log("draft_edited", draft_id=draft_id)
+        return self.format_draft(self.store.draft(draft_id))
+
+    def redo_draft(self, draft_id: int, instruction: str) -> str:
+        d = self.store.draft(draft_id)
+        if d is None:
+            return f"No draft #{draft_id}."
+        if d["status"] != "pending":
+            return f"Draft #{draft_id} is already {d['status']}."
+        if not instruction.strip():
+            return f"Say what to change, e.g. redo {draft_id} shorter, offer a call on Tuesday"
+        conn = self.connector(d["source"])
+        body = conn.fetch_body(d["external_id"]) if conn else d["summary"]
+        new = self.brain.revise_draft(d["sender"], d["subject"], body, d["body"], instruction)
+        self.store.update_draft_body(draft_id, new.reply, new.needs_input)
+        self.store.log("draft_revised", draft_id=draft_id)
+        return self.format_draft(self.store.draft(draft_id))
 
     # --- response-time promise ---------------------------------------------
 
@@ -196,6 +324,7 @@ class Agent:
             "response_promise": f"reply to clients/leads within {self.settings.sla_hours:g} business hours",
             "response_record_last_7_days": self.store.response_stats(now - timedelta(days=7)),
             "tasks_today_and_overdue": tasks,
+            "reply_drafts_waiting_for_your_approval": len(self.store.pending_drafts()),
         }
 
     def morning_brief(self) -> str:

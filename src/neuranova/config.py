@@ -45,6 +45,12 @@ class Settings:
     task_reminder_lead_minutes: int
     instant_high_priority: bool
     db_path: Path
+    auto_create_tasks: bool = True
+    drafts_enabled: bool = True
+    reply_signature: str = ""
+    reply_tone: str = ""
+    draft_lookback_days: int = 3
+    max_drafts_per_run: int = 5
     model: str = DEFAULT_MODEL
     env: dict[str, str] = field(default_factory=dict, repr=False)
 
@@ -69,6 +75,8 @@ def load_settings(config_path: str | Path | None = None, env: dict[str, str] | N
     sla = raw.get("response_sla", {})
     sched = raw.get("schedule", {})
     alerts = raw.get("alerts", {})
+    tasks = raw.get("tasks", {})
+    replies = raw.get("replies", {})
 
     days = wh.get("days", DAY_NAMES[:5])
     return Settings(
@@ -91,6 +99,12 @@ def load_settings(config_path: str | Path | None = None, env: dict[str, str] | N
         task_reminder_lead_minutes=int(sched.get("task_reminder_lead_minutes", 30)),
         instant_high_priority=bool(alerts.get("instant_high_priority", True)),
         db_path=Path(env.get("NEURANOVA_DB") or "data/neuranova.db"),
+        auto_create_tasks=bool(tasks.get("auto_create_from_email", True)),
+        drafts_enabled=bool(replies.get("draft_replies", True)),
+        reply_signature=replies.get("signature", "").strip(),
+        reply_tone=replies.get("tone", "").strip(),
+        draft_lookback_days=int(replies.get("draft_lookback_days", 3)),
+        max_drafts_per_run=int(replies.get("max_drafts_per_run", 5)),
         model=env.get("NEURANOVA_MODEL") or DEFAULT_MODEL,
         env=env,
     )

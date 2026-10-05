@@ -1,7 +1,11 @@
-"""Outlook / Microsoft 365 via Microsoft Graph, read-only. Authorise once: `neuranova auth outlook`."""
+"""Outlook / Microsoft 365 via Microsoft Graph: read the inbox, send replies you approved.
+
+Authorise once: `neuranova auth outlook`.
+"""
 
 from __future__ import annotations
 
+import html
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -9,7 +13,7 @@ import httpx
 
 from ..models import EmailMessage
 
-SCOPES = ["Mail.Read"]
+SCOPES = ["Mail.Read", "Mail.Send"]
 GRAPH = "https://graph.microsoft.com/v1.0"
 
 
@@ -84,7 +88,7 @@ class OutlookConnector:
             f"{GRAPH}/me/mailFolders/inbox/messages",
             {
                 "$filter": f"receivedDateTime ge {_graph_time(since)}",
-                "$select": "id,conversationId,from,subject,bodyPreview,receivedDateTime",
+                "$select": "id,conversationId,from,subject,bodyPreview,receivedDateTime,webLink",
                 "$orderby": "receivedDateTime desc",
                 "$top": "50",
             },
@@ -102,8 +106,27 @@ class OutlookConnector:
                 subject=m.get("subject") or "(no subject)",
                 snippet=m.get("bodyPreview", ""),
                 received_at=_parse_dt(m["receivedDateTime"]),
+                link=m.get("webLink", ""),
             ))
         return out
+
+    def fetch_body(self, external_id: str) -> str:
+        resp = self.http.get(
+            f"{GRAPH}/me/messages/{external_id}",
+            params={"$select": "uniqueBody,bodyPreview"},
+            headers={**self.headers, "Prefer": 'outlook.body-content-type="text"'},
+        )
+        resp.raise_for_status()
+        body = resp.json()
+        return ((body.get("uniqueBody") or {}).get("content") or body.get("bodyPreview", "")).strip()
+
+    def send_reply(self, external_id: str, body: str) -> str:
+        # `comment` is HTML placed above the quoted original, like replying in Outlook.
+        comment = html.escape(body).replace("\n", "<br>")
+        resp = self.http.post(f"{GRAPH}/me/messages/{external_id}/reply",
+                              json={"comment": comment}, headers=self.headers)
+        resp.raise_for_status()
+        return external_id
 
     def latest_replies(self, since: datetime) -> dict[str, datetime]:
         rows = self._pages(

@@ -38,20 +38,25 @@ def build_agent(settings: Settings):
             log.warning("Outlook disabled: %s", exc)
 
     todoist_token = settings.secret("TODOIST_API_TOKEN")
+    store = Store(settings.db_path, settings.workspace_id, settings.owner_id)
     return Agent(
         settings=settings,
-        store=Store(settings.db_path, settings.workspace_id, settings.owner_id),
-        brain=Brain(settings.model, settings.goals),
-        notifier=build_notifier(settings),
+        store=store,
+        brain=Brain(settings.model, settings.goals, tone=settings.reply_tone, signature=settings.reply_signature),
+        notifier=build_notifier(settings, store),
         mail=mail,
         todoist=TodoistConnector(todoist_token) if todoist_token else None,
     )
 
 
 def run_forever(settings: Settings) -> None:
+    from apscheduler.schedulers.background import BackgroundScheduler
     from apscheduler.schedulers.blocking import BlockingScheduler
 
-    sched = BlockingScheduler(timezone=settings.tz)
+    webhook = bool(settings.secret("WHATSAPP_VERIFY_TOKEN"))
+    if webhook and not settings.secret("WHATSAPP_APP_SECRET"):
+        raise SystemExit("WHATSAPP_APP_SECRET is required when the webhook is enabled (see docs/SETUP.md)")
+    sched = (BackgroundScheduler if webhook else BlockingScheduler)(timezone=settings.tz)
 
     def job(name):
         def run():
@@ -74,6 +79,15 @@ def run_forever(settings: Settings) -> None:
              settings.morning_brief.strftime("%H:%M"), settings.tz.key)
     job("check_inbox")()
     sched.start()
+    if webhook:
+        import uvicorn
+
+        from .server import create_app
+
+        port = int(settings.secret("WEBHOOK_PORT") or 8080)
+        log.info("WhatsApp webhook listening on port %s at /webhook", port)
+        uvicorn.run(create_app(settings, lambda: build_agent(settings)), host="0.0.0.0", port=port,
+                    log_level="warning")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -84,12 +98,14 @@ def main(argv: list[str] | None = None) -> int:
 
     auth = sub.add_parser("auth", help="connect an account (one-time)")
     auth.add_argument("service", choices=["gmail", "outlook"])
-    sub.add_parser("check", help="fetch and triage new mail now")
+    sub.add_parser("check", help="fetch and triage new mail, create tasks and drafts now")
     sub.add_parser("sla", help="check reply deadlines now")
     sub.add_parser("reminders", help="send due task reminders now")
     sub.add_parser("brief", help="build and send the morning brief now")
     sub.add_parser("facts", help="print the data the brief is built from (no Claude call, nothing sent)")
     sub.add_parser("test-notify", help="send a test message on the configured channel")
+    cmd = sub.add_parser("cmd", help='run a WhatsApp command locally, e.g. neuranova cmd "send 12"')
+    cmd.add_argument("text", nargs="+")
     sub.add_parser("run", help="run the scheduler (keep this running on the server)")
 
     args = parser.parse_args(argv)
@@ -129,6 +145,9 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"sent": agent.task_reminders()}))
     elif args.command == "brief":
         agent.morning_brief()
+    elif args.command == "cmd":
+        from .commands import handle
+        print(handle(agent, " ".join(args.text)))
     elif args.command == "facts":
         print(json.dumps(agent.gather_brief_facts(), indent=2, default=str))
     return 0

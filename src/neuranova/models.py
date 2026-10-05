@@ -21,6 +21,7 @@ class EmailMessage:
     subject: str
     snippet: str
     received_at: datetime  # timezone-aware
+    link: str = ""         # open-in-mailbox URL
 
 
 @dataclass
@@ -30,6 +31,15 @@ class Triage:
     needs_reply: bool
     summary: str
     suggested_action: str
+    create_task: bool = False
+    task_title: str = ""
+    task_due: str = ""     # Todoist natural language, e.g. "friday", "" for no date
+
+
+@dataclass
+class Draft:
+    reply: str
+    needs_input: list[str]
 
 
 @dataclass

@@ -45,3 +45,34 @@ def test_outlook_inbox_and_replies():
     [msg] = conn.fetch_inbox(utc(2026, 10, 4))
     assert msg.sender == "Asha <asha@client.com>" and msg.received_at.tzinfo == timezone.utc
     assert conn.latest_replies(utc(2026, 10, 4)) == {"c1": utc(2026, 10, 5, 10)}
+
+
+def test_db_upgrades_phase1_database(tmp_path):
+    import sqlite3
+
+    from neuranova.db import Store
+    path = tmp_path / "old.db"
+    old = sqlite3.connect(path)
+    old.execute("CREATE TABLE emails (id INTEGER PRIMARY KEY, workspace_id TEXT, owner_id TEXT, source TEXT,"
+                " external_id TEXT, thread_id TEXT, sender TEXT, subject TEXT, snippet TEXT, received_at TEXT,"
+                " category TEXT, priority TEXT, needs_reply INTEGER, summary TEXT, suggested_action TEXT,"
+                " triaged_at TEXT, reply_deadline TEXT, replied_at TEXT, sla_stage INTEGER DEFAULT 0,"
+                " alerted_new INTEGER DEFAULT 0, UNIQUE (owner_id, source, external_id))")
+    old.commit()
+    old.close()
+    store = Store(path, "neuranova", "owner")
+    cols = {r["name"] for r in store.conn.execute("PRAGMA table_info(emails)")}
+    assert {"link", "create_task", "task_title", "task_due", "task_id"} <= cols
+
+
+def test_outlook_send_reply_posts_html_comment():
+    seen = {}
+
+    def handler(request):
+        seen["url"], seen["body"] = str(request.url), request.read().decode()
+        return httpx.Response(202)
+
+    conn = OutlookConnector("tok", http=httpx.Client(transport=httpx.MockTransport(handler)))
+    conn.send_reply("m1", "Hi <Asha>\nThanks")
+    assert seen["url"].endswith("/me/messages/m1/reply")
+    assert "Hi &lt;Asha&gt;<br>Thanks" in seen["body"]

@@ -29,3 +29,18 @@ def test_whatsapp_sends_template_messages():
     assert '"to":"919999999999"' in body.replace(" ", "")
     assert "Hello | world" in body
     assert sent[0].headers["authorization"] == "Bearer tok"
+
+
+def test_free_text_inside_window_and_teaser_outside():
+    sent = []
+    handler = lambda request: sent.append(request.read().decode()) or httpx.Response(200, json={})
+    window = {"open": True}
+    n = WhatsAppNotifier("tok", "123", "919999999999", "neuranova_update",
+                         http=httpx.Client(transport=httpx.MockTransport(handler)),
+                         window_open=lambda: window["open"])
+    n.send("Draft #1\nHi Asha", teaser="Draft #1 ready")
+    assert '"type":"text"' in sent[0].replace(" ", "") and "Draft #1\\nHi Asha" in sent[0]
+    window["open"] = False
+    n.send("Draft #1\nHi Asha", teaser="Draft #1 ready")
+    assert '"type":"template"' in sent[1].replace(" ", "") and "Draft #1 ready" in sent[1]
+    assert "Hi Asha" not in sent[1]
