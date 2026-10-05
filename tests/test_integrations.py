@@ -40,13 +40,13 @@ def test_page_is_founder_only_and_never_shows_secrets(tmp_path, monkeypatch):
     monkeypatch.setattr(integ, "test_integration", lambda name, s, store: (True, "Key works.", None))
     settings, store, client = signed_in(tmp_path)
     page = client.get("/integrations").text
-    assert "0 of 5 connected" in page and "Connect with Google" in page and "/integrations/google/callback" in page
+    assert "0 of 4 connected" in page and "Connect with Google" in page and "/integrations/google/callback" in page
     token = csrf_of(page)
     resp = client.post("/integrations/claude/save", data={"csrf": token, "ANTHROPIC_API_KEY": "sk-ant-secret-9f2a"},
                        follow_redirects=False)
     assert "Key works" in resp.headers["location"].replace("%20", " ")
     page = client.get("/integrations").text
-    assert "sk-ant-secret" not in page and "••••9f2a" in page and "1 of 5 connected" in page
+    assert "sk-ant-secret" not in page and "••••9f2a" in page and "1 of 4 connected" in page
     # a blank secret keeps the saved one
     client.post("/integrations/claude/save", data={"csrf": token, "ANTHROPIC_API_KEY": ""})
     assert integ.with_integrations(settings, store).secret("ANTHROPIC_API_KEY") == "sk-ant-secret-9f2a"
