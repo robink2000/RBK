@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 from .jobs import Agent
+from .team import TeamError, format_task
 
 HELP = """NeuraNova agent - just text me normally, e.g.
 "remind me to call Asha friday 3pm"
@@ -21,23 +22,54 @@ redo 12 <what to change> - let the agent rewrite it
 skip 12 - don't send draft #12
 status - what's waiting on you
 report - latest weekly progress report
+help - this message
+
+Team tasks:
+tasks - your open tasks
+team - the whole team's open tasks
+done 12 - mark team task #12 done
+blocked 12 <reason> - flag that you're stuck"""
+
+MEMBER_HELP = """NeuraNova agent - just text me normally, e.g.
+"what's on my plate?"
+"give Priya the Acme banner, due friday 5pm"
+"delivered the Globex site on time"
+
+tasks - your open tasks
+team - the whole team's open tasks
+done 12 - mark task #12 done
+blocked 12 <reason> - flag that you're stuck
 help - this message"""
 
 PATTERN = re.compile(r"^\s*([a-zA-Z]+)\s*(?:#?(\d+))?[\s:,-]*(.*)$", re.DOTALL)
 
 
-def handle(agent: Agent, text: str, chat=None) -> str:
-    """Run a draft command, or pass free text to the chat assistant (`chat(text) -> str`)."""
+def handle(agent: Agent, text: str, chat=None, user=None) -> str:
+    """Run a command, or pass free text to the chat assistant (`chat(text) -> str`).
+
+    `user` is the team member who sent it (defaults to the founder). Draft commands work on the
+    founder's mailbox, so only the founder can use them.
+    """
+    user = user or agent.store.user(agent.settings.owner_id)
+    is_owner = user is None or user["id"] == agent.settings.owner_id
     match = PATTERN.match(text or "")
     if not match:
-        return chat(text) if chat and (text or "").strip() else HELP
+        return chat(text) if chat and (text or "").strip() else (HELP if is_owner else MEMBER_HELP)
     word, number, rest = match.group(1).lower(), match.group(2), match.group(3)
     draft_id = int(number) if number else None
 
     alone = draft_id is None and not rest.strip()  # the message is just this one word
 
     if word in ("help", "menu", "commands") and alone:
-        return HELP
+        return HELP if is_owner else MEMBER_HELP
+
+    if user is not None:
+        team_reply = _team_command(agent, user, word, draft_id, rest, alone)
+        if team_reply is not None:
+            return team_reply
+
+    if not is_owner:
+        return chat(text) if chat else MEMBER_HELP
 
     if word in ("drafts", "pending") and alone:
         drafts = agent.store.pending_drafts()
@@ -78,3 +110,25 @@ def handle(agent: Agent, text: str, chat=None) -> str:
         return agent.redo_draft(draft_id, rest)
 
     return chat(text) if chat else HELP
+
+
+def _team_command(agent: Agent, user, word: str, task_id: int | None, rest: str, alone: bool) -> str | None:
+    tz = agent.settings.tz
+    if word == "tasks" and alone:
+        mine = agent.store.team_tasks("open", assignee_id=user["id"])
+        return "\n".join(["Your open team tasks:"] + [format_task(t, tz) for t in mine]) if mine \
+            else "You have no open team tasks. 🎉"
+    if word == "team" and alone:
+        tasks = agent.store.team_tasks("open")
+        return "\n".join(["Team board:"] + [format_task(t, tz) for t in tasks[:40]]) if tasks \
+            else "The team board is empty."
+    try:
+        if word == "done" and task_id is not None and not rest.strip():
+            return agent.complete_team_task(user, task_id)
+        if word == "blocked" and task_id is not None and rest.strip():
+            return agent.block_team_task(user, task_id, rest)
+        if word == "reopen" and task_id is not None and not rest.strip():
+            return agent.reopen_team_task(user, task_id)
+    except TeamError as exc:
+        return str(exc)
+    return None

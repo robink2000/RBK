@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from neuranova.config import load_settings
 from neuranova.db import Store
-from neuranova.notify import LAST_INBOUND_KEY
+from neuranova.notify import inbound_key
 from neuranova.server import create_app
 
 SECRET = "app-secret"
@@ -20,7 +20,8 @@ def setup(tmp_path):
     settings = load_settings(tmp_path / "none.toml", env=env)
     store = Store(":memory:", settings.workspace_id, settings.owner_id)
     sent = []
-    agent = SimpleNamespace(store=store, notifier=SimpleNamespace(send=lambda t, teaser=None: sent.append(t)))
+    agent = SimpleNamespace(store=store, settings=settings,
+                            notifier=SimpleNamespace(send=lambda t, teaser=None: sent.append(t)))
     app = create_app(settings, lambda: agent, store=store)
     return TestClient(app), store, sent
 
@@ -48,7 +49,7 @@ def test_verify_handshake(tmp_path):
 def test_rejects_bad_signature(tmp_path):
     client, store, sent = setup(tmp_path)
     assert post(client, inbound(OWNER, "status"), secret="wrong").status_code == 403
-    assert sent == [] and store.get(LAST_INBOUND_KEY) is None
+    assert sent == [] and store.get(inbound_key(OWNER)) is None
 
 
 def test_owner_message_runs_command_once(tmp_path):
@@ -56,10 +57,10 @@ def test_owner_message_runs_command_once(tmp_path):
     assert post(client, inbound(OWNER, "drafts")).status_code == 200
     assert post(client, inbound(OWNER, "drafts")).status_code == 200   # Meta retry, same id
     assert sent == ["No drafts waiting. 🎉"]
-    assert store.get(LAST_INBOUND_KEY) is not None                       # opens the 24h window
+    assert store.get(inbound_key(OWNER)) is not None                       # opens the 24h window
 
 
 def test_strangers_are_ignored(tmp_path):
     client, store, sent = setup(tmp_path)
     assert post(client, inbound("15550001111", "send 1")).status_code == 200
-    assert sent == [] and store.get(LAST_INBOUND_KEY) is None
+    assert sent == [] and store.get(inbound_key(OWNER)) is None

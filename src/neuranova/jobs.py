@@ -7,6 +7,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from typing import Callable
 
 from .brain import Brain, EmailForTriage
 from .config import Settings
@@ -15,8 +16,9 @@ from .connectors.gmail import sender_name
 from .connectors.todoist import TodoistConnector, localize
 from .db import Store, row_dt
 from .notify import Notifier
-from .progress import compute as compute_progress, weekly_series
+from .progress import compute as compute_progress, team_stats, weekly_series
 from .sla import reply_deadline
+from .team import TeamError, can_change, format_task
 
 log = logging.getLogger(__name__)
 
@@ -35,6 +37,7 @@ class Agent:
     notifier: Notifier
     mail: list[MailConnector] = field(default_factory=list)
     todoist: TodoistConnector | None = None
+    notifier_factory: Callable[[str], Notifier] | None = None  # WhatsApp number -> notifier for that person
 
     def _now(self) -> datetime:
         return datetime.now(timezone.utc)
@@ -228,6 +231,115 @@ class Agent:
         self.store.log("draft_revised", draft_id=draft_id)
         return self.format_draft(self.store.draft(draft_id))
 
+    # --- team -----------------------------------------------------------------------
+
+    def notify_user(self, user, text: str, teaser: str | None = None) -> bool:
+        """Message a team member on WhatsApp. The founder uses the main notifier."""
+        if user is None:
+            return False
+        if user["id"] == self.settings.owner_id:
+            self.notifier.send(text, teaser=teaser)
+            return True
+        if user["whatsapp"] and self.notifier_factory:
+            try:
+                self.notifier_factory(user["whatsapp"]).send(text, teaser=teaser)
+                return True
+            except Exception:
+                log.exception("Could not message %s", user["id"])
+        return False
+
+    def notify_admins(self, text: str, except_id: str | None = None) -> None:
+        for u in self.store.users():
+            if u["role"] == "admin" and u["id"] != except_id:
+                self.notify_user(u, text)
+
+    def assign_team_task(self, by_user, assignee, title: str, due_at: datetime | None = None,
+                         notes: str = "", email_id: int | None = None) -> int:
+        if not title.strip():
+            raise TeamError("A task needs a title.")
+        if not assignee["active"]:
+            raise TeamError(f"{assignee['name']} is not active on the team.")
+        task_id = self.store.add_team_task(title, assignee["id"], by_user["id"], due_at, notes, email_id)
+        self.store.log("team_task_created", by=by_user["id"], task_id=task_id, assignee=assignee["id"])
+        if assignee["id"] != by_user["id"]:
+            task = self.store.team_task(task_id)
+            self.notify_user(assignee, f"📌 New task from {by_user['name']}\n{format_task(task, self.settings.tz)}"
+                                       + (f"\n{notes}" if notes else "")
+                                       + f"\nReply 'done {task_id}' when finished.",
+                             teaser=f"New task from {by_user['name']}: {title}")
+        return task_id
+
+    def _task_for_change(self, by_user, task_id: int):
+        task = self.store.team_task(task_id)
+        if task is None:
+            raise TeamError(f"No team task #{task_id}.")
+        if not can_change(by_user, task):
+            raise TeamError(f"Only {task['assignee_name']}, the person who created it, or an admin can change #{task_id}.")
+        return task
+
+    def complete_team_task(self, by_user, task_id: int) -> str:
+        task = self._task_for_change(by_user, task_id)
+        if task["status"] == "done":
+            return f"#{task_id} is already done."
+        self.store.update_team_task(task_id, status="done", done_at=self._now(), blocked_reason="")
+        self.store.log("team_task_done", by=by_user["id"], task_id=task_id)
+        creator = self.store.user(task["created_by"])
+        if creator and creator["id"] != by_user["id"]:
+            self.notify_user(creator, f"✅ {by_user['name']} finished #{task_id} {task['title']}")
+        return f"✅ Done: #{task_id} {task['title']}"
+
+    def block_team_task(self, by_user, task_id: int, reason: str) -> str:
+        task = self._task_for_change(by_user, task_id)
+        if not reason.strip():
+            raise TeamError("Say what's blocking it, e.g. 'blocked 12 waiting for client logo'.")
+        self.store.update_team_task(task_id, status="blocked", blocked_reason=reason.strip()[:300])
+        self.store.log("team_task_blocked", by=by_user["id"], task_id=task_id, reason=reason[:200])
+        msg = f"🚧 {by_user['name']} is blocked on #{task_id} {task['title']}\nReason: {reason.strip()}"
+        self.notify_admins(msg, except_id=by_user["id"])
+        creator = self.store.user(task["created_by"])
+        if creator and creator["role"] != "admin" and creator["id"] != by_user["id"]:
+            self.notify_user(creator, msg)
+        return f"Marked #{task_id} as blocked. The admins have been told."
+
+    def reopen_team_task(self, by_user, task_id: int) -> str:
+        self._task_for_change(by_user, task_id)
+        self.store.update_team_task(task_id, status="open", blocked_reason="", done_at=None)
+        self.store.log("team_task_reopened", by=by_user["id"], task_id=task_id)
+        return f"Reopened #{task_id}."
+
+    def reassign_team_task(self, by_user, task_id: int, assignee) -> str:
+        task = self._task_for_change(by_user, task_id)
+        self.store.update_team_task(task_id, assignee_id=assignee["id"], reminded=0, overdue_alerted=0)
+        self.store.log("team_task_reassigned", by=by_user["id"], task_id=task_id, to=assignee["id"])
+        if assignee["id"] != by_user["id"]:
+            self.notify_user(assignee, f"📌 {by_user['name']} handed you #{task_id} {task['title']}",
+                             teaser=f"{by_user['name']} handed you a task: {task['title']}")
+        return f"#{task_id} now belongs to {assignee['name']}."
+
+    def team_reminders(self) -> dict[str, int]:
+        """Ping assignees shortly before a due time, and tell assignee + admins once when overdue."""
+        now = self._now()
+        lead = timedelta(minutes=self.settings.task_reminder_lead_minutes)
+        sent = {"reminded": 0, "overdue": 0}
+        for t in self.store.team_tasks("open"):
+            due = row_dt(t["due_at"])
+            if due is None or t["status"] == "blocked":
+                continue
+            assignee = self.store.user(t["assignee_id"])
+            if now < due <= now + lead and not t["reminded"]:
+                self.notify_user(assignee, f"⏰ Due {self._fmt(due)}: #{t['id']} {t['title']}")
+                self.store.update_team_task(t["id"], reminded=1)
+                sent["reminded"] += 1
+            elif due <= now and not t["overdue_alerted"]:
+                text = f"⚠️ Overdue: {format_task(t, self.settings.tz)}"
+                self.notify_user(assignee, text + f"\nReply 'done {t['id']}' or 'blocked {t['id']} <reason>'.")
+                self.notify_admins(text, except_id=t["assignee_id"])
+                self.store.update_team_task(t["id"], overdue_alerted=1, reminded=1)
+                sent["overdue"] += 1
+        if any(sent.values()):
+            self.store.log("team_reminders", **sent)
+        return sent
+
     # --- response-time promise ---------------------------------------------
 
     def check_sla(self) -> dict[str, int]:
@@ -327,6 +439,10 @@ class Agent:
             "tasks_today_and_overdue": tasks,
             "reply_drafts_waiting_for_your_approval": len(self.store.pending_drafts()),
             "goal_progress_last_7_days": compute_progress(self.store, self.settings.tz, days=7),
+            "team_overdue_or_blocked": [
+                format_task(t, self.settings.tz) for t in self.store.team_tasks("open")
+                if t["status"] == "blocked" or (t["due_at"] and row_dt(t["due_at"]) < now)
+            ][:15],
         }
 
     def weekly_report(self) -> str:
@@ -335,6 +451,9 @@ class Agent:
             "last_30_days": compute_progress(self.store, self.settings.tz, days=30),
             "by_week": weekly_series(self.store, self.settings.tz, weeks=8),
             "recent_events": [dict(e) for e in self.store.recent_events(20)],
+            "team_last_7_days": team_stats(self.store, days=7),
+            "team_blocked_now": [format_task(t, self.settings.tz) + f" ({t['blocked_reason']})"
+                                 for t in self.store.team_tasks("open") if t["status"] == "blocked"],
         }
         text = self.brain.write_weekly(facts)
         self.notifier.send(text, teaser="Your weekly NeuraNova progress report is ready. Reply 'report' to read it.")

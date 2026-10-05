@@ -90,13 +90,26 @@ In `neuranova.toml` under `[replies]`, set your **signature** (replace `[Your na
 ### 5d. Dashboard
 
 1. In `.env`:
+   - `OWNER_EMAIL` and `OWNER_NAME`: your sign-in email and the name teammates see
    - `DASHBOARD_PASSWORD`: a long password
    - `DASHBOARD_SECRET`: generate one with `python3 -c "import secrets; print(secrets.token_urlsafe(48))"`
+   - `PUBLIC_URL`: your dashboard address, e.g. `https://agent.yourdomain.com` (used in invite links)
 2. The dashboard is served at the same address as the webhook, e.g. `https://agent.yourdomain.com/`. The Caddy setup in 5b already covers it.
 3. On your phone, open it and choose **Add to Home screen** to use it like an app.
 4. To try it locally without HTTPS, add `DASHBOARD_INSECURE_COOKIE=1` to `.env`, run `neuranova run`, and open `http://localhost:8080`. Never set this on the real server.
 
 Progress for the quality goal and for deals comes from what you log. Either tell the bot on WhatsApp ("delivered the Acme site on time", "won Globex, 80000") or use the **Log progress** form on the dashboard.
+
+### 5e. Add your team
+
+1. Sign in, open **Team → Invite someone**, and enter their name, email, role and (optionally) WhatsApp number.
+2. Copy the link that appears and send it to them yourself. It's shown only once, works once, and expires in 7 days.
+3. They open it, choose a password, and they're in. They sign in later with their email.
+4. If they gave a WhatsApp number, they can text the bot number too (`help` lists their commands).
+   - WhatsApp's 24-hour rule applies to each person separately. Until they've texted the bot, their task alerts go out as the `neuranova_update` template, which Meta charges a small fee for.
+5. **Forgot password?** Use **Reset link** next to their name. **Someone leaving?** Use **Deactivate**: they're signed out at once, and their tasks stay on the board for you to hand over.
+
+Make someone an **admin** only if they should manage people. Admins still never see your inbox or drafts.
 
 ## 6. Run it on a server
 

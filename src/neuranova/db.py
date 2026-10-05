@@ -70,6 +70,50 @@ CREATE TABLE IF NOT EXISTS chat_log (
     text     TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS users (
+    id            TEXT PRIMARY KEY,
+    workspace_id  TEXT NOT NULL,
+    email         TEXT NOT NULL,
+    name          TEXT NOT NULL,
+    role          TEXT NOT NULL,             -- admin | member
+    password_hash TEXT NOT NULL DEFAULT '',
+    whatsapp      TEXT NOT NULL DEFAULT '',  -- digits only, for reminders and chat
+    active        INTEGER NOT NULL DEFAULT 1,
+    created_at    TEXT NOT NULL,
+    UNIQUE (workspace_id, email)
+);
+
+CREATE TABLE IF NOT EXISTS invites (
+    token_hash   TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    email        TEXT NOT NULL,
+    name         TEXT NOT NULL,
+    role         TEXT NOT NULL,
+    whatsapp     TEXT NOT NULL DEFAULT '',
+    user_id      TEXT,                      -- set for password-reset links
+    created_by   TEXT NOT NULL,
+    expires_at   TEXT NOT NULL,
+    used_at      TEXT
+);
+
+CREATE TABLE IF NOT EXISTS team_tasks (
+    id             INTEGER PRIMARY KEY,
+    workspace_id   TEXT NOT NULL,
+    title          TEXT NOT NULL,
+    notes          TEXT NOT NULL DEFAULT '',
+    assignee_id    TEXT NOT NULL REFERENCES users(id),
+    created_by     TEXT NOT NULL,
+    due_at         TEXT,                     -- UTC ISO, optional
+    status         TEXT NOT NULL DEFAULT 'open',   -- open | blocked | done
+    blocked_reason TEXT NOT NULL DEFAULT '',
+    email_id       INTEGER,                  -- task created from an email
+    created_at     TEXT NOT NULL,
+    done_at        TEXT,
+    reminded       INTEGER NOT NULL DEFAULT 0,
+    overdue_alerted INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS team_tasks_open ON team_tasks (workspace_id, status, assignee_id);
+
 CREATE TABLE IF NOT EXISTS inbound_seen (
     message_id TEXT PRIMARY KEY,
     at         TEXT NOT NULL
@@ -363,11 +407,164 @@ class Store:
                           (self.owner_id, _iso(datetime.now(timezone.utc)), role, text))
         self.conn.commit()
 
-    def recent_chat(self, limit: int = 8) -> list[sqlite3.Row]:
-        rows = self.conn.execute(
-            "SELECT * FROM chat_log WHERE owner_id = ? ORDER BY id DESC LIMIT ?", (self.owner_id, limit)
-        ).fetchall()
+    def recent_chat(self, limit: int = 8, role_prefix: tuple[str, ...] | None = None) -> list[sqlite3.Row]:
+        """Recent chat lines; `role_prefix` keeps one person's conversation separate from others'."""
+        if role_prefix:
+            marks = ",".join("?" * len(role_prefix))
+            rows = self.conn.execute(
+                f"SELECT * FROM chat_log WHERE owner_id = ? AND role IN ({marks}) ORDER BY id DESC LIMIT ?",
+                (self.owner_id, *role_prefix, limit),
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM chat_log WHERE owner_id = ? ORDER BY id DESC LIMIT ?", (self.owner_id, limit)
+            ).fetchall()
         return list(reversed(rows))
+
+    # --- team: users -------------------------------------------------------------
+
+    def user(self, user_id: str) -> sqlite3.Row | None:
+        return self.conn.execute("SELECT * FROM users WHERE id = ? AND workspace_id = ?",
+                                 (user_id, self.workspace_id)).fetchone()
+
+    def user_by_email(self, email: str) -> sqlite3.Row | None:
+        return self.conn.execute("SELECT * FROM users WHERE workspace_id = ? AND lower(email) = lower(?)",
+                                 (self.workspace_id, email.strip())).fetchone()
+
+    def user_by_whatsapp(self, digits: str) -> sqlite3.Row | None:
+        if not digits:
+            return None
+        return self.conn.execute("SELECT * FROM users WHERE workspace_id = ? AND whatsapp = ? AND active = 1",
+                                 (self.workspace_id, digits)).fetchone()
+
+    def users(self, active_only: bool = True) -> list[sqlite3.Row]:
+        q = "SELECT * FROM users WHERE workspace_id = ?" + (" AND active = 1" if active_only else "")
+        return self.conn.execute(q + " ORDER BY role, name", (self.workspace_id,)).fetchall()
+
+    def upsert_user(self, user_id: str, email: str, name: str, role: str, password_hash: str | None = None,
+                    whatsapp: str | None = None) -> None:
+        existing = self.user(user_id)
+        if existing is None:
+            self.conn.execute(
+                """INSERT INTO users (id, workspace_id, email, name, role, password_hash, whatsapp, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (user_id, self.workspace_id, email.strip(), name.strip(), role, password_hash or "",
+                 whatsapp or "", _iso(datetime.now(timezone.utc))),
+            )
+        else:
+            self.conn.execute(
+                """UPDATE users SET email = ?, name = ?, role = ?, password_hash = COALESCE(?, password_hash),
+                   whatsapp = COALESCE(?, whatsapp), active = 1 WHERE id = ? AND workspace_id = ?""",
+                (email.strip(), name.strip(), role, password_hash, whatsapp, user_id, self.workspace_id),
+            )
+        self.conn.commit()
+
+    def set_user_fields(self, user_id: str, **fields) -> None:
+        allowed = {"name", "role", "whatsapp", "active", "password_hash"}
+        cols = [k for k in fields if k in allowed]
+        if not cols:
+            return
+        self.conn.execute(
+            f"UPDATE users SET {', '.join(f'{c} = ?' for c in cols)} WHERE id = ? AND workspace_id = ?",
+            (*[fields[c] for c in cols], user_id, self.workspace_id),
+        )
+        self.conn.commit()
+
+    # --- team: invites -------------------------------------------------------------
+
+    def add_invite(self, token_hash: str, email: str, name: str, role: str, whatsapp: str,
+                   created_by: str, expires_at: datetime, user_id: str | None = None) -> None:
+        self.conn.execute(
+            """INSERT INTO invites (token_hash, workspace_id, email, name, role, whatsapp, user_id, created_by, expires_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (token_hash, self.workspace_id, email.strip(), name.strip(), role, whatsapp, user_id, created_by,
+             _iso(expires_at)),
+        )
+        self.conn.commit()
+
+    def invite(self, token_hash: str) -> sqlite3.Row | None:
+        return self.conn.execute(
+            """SELECT * FROM invites WHERE token_hash = ? AND workspace_id = ? AND used_at IS NULL
+               AND expires_at > ?""",
+            (token_hash, self.workspace_id, _iso(datetime.now(timezone.utc))),
+        ).fetchone()
+
+    def use_invite(self, token_hash: str) -> bool:
+        cur = self.conn.execute("UPDATE invites SET used_at = ? WHERE token_hash = ? AND used_at IS NULL",
+                                (_iso(datetime.now(timezone.utc)), token_hash))
+        self.conn.commit()
+        return cur.rowcount == 1
+
+    def open_invites(self) -> list[sqlite3.Row]:
+        return self.conn.execute(
+            """SELECT * FROM invites WHERE workspace_id = ? AND used_at IS NULL AND expires_at > ?
+               ORDER BY expires_at""",
+            (self.workspace_id, _iso(datetime.now(timezone.utc))),
+        ).fetchall()
+
+    def revoke_invite(self, token_hash: str) -> None:
+        self.conn.execute("DELETE FROM invites WHERE token_hash = ? AND workspace_id = ? AND used_at IS NULL",
+                          (token_hash, self.workspace_id))
+        self.conn.commit()
+
+    # --- team: tasks ---------------------------------------------------------------
+
+    def add_team_task(self, title: str, assignee_id: str, created_by: str, due_at: datetime | None = None,
+                      notes: str = "", email_id: int | None = None) -> int:
+        cur = self.conn.execute(
+            """INSERT INTO team_tasks (workspace_id, title, notes, assignee_id, created_by, due_at, email_id, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (self.workspace_id, title.strip(), notes.strip(), assignee_id, created_by, _iso(due_at), email_id,
+             _iso(datetime.now(timezone.utc))),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def team_task(self, task_id: int) -> sqlite3.Row | None:
+        return self.conn.execute(
+            """SELECT t.*, u.name AS assignee_name, u.whatsapp AS assignee_whatsapp
+               FROM team_tasks t JOIN users u ON u.id = t.assignee_id
+               WHERE t.id = ? AND t.workspace_id = ?""",
+            (task_id, self.workspace_id),
+        ).fetchone()
+
+    def team_tasks(self, status: str | None = "open", assignee_id: str | None = None,
+                   limit: int = 200) -> list[sqlite3.Row]:
+        """status: 'open' means open or blocked; 'done'; None for all."""
+        q = """SELECT t.*, u.name AS assignee_name, u.whatsapp AS assignee_whatsapp
+               FROM team_tasks t JOIN users u ON u.id = t.assignee_id WHERE t.workspace_id = ?"""
+        args: list = [self.workspace_id]
+        if status == "open":
+            q += " AND t.status IN ('open', 'blocked')"
+        elif status:
+            q += " AND t.status = ?"
+            args.append(status)
+        if assignee_id:
+            q += " AND t.assignee_id = ?"
+            args.append(assignee_id)
+        q += " ORDER BY t.status = 'done', t.due_at IS NULL, t.due_at, t.id LIMIT ?"
+        return self.conn.execute(q, (*args, limit)).fetchall()
+
+    def update_team_task(self, task_id: int, **fields) -> bool:
+        allowed = {"title", "notes", "assignee_id", "due_at", "status", "blocked_reason", "done_at",
+                   "reminded", "overdue_alerted"}
+        cols = [k for k in fields if k in allowed]
+        if not cols:
+            return False
+        values = [_iso(v) if isinstance(v, datetime) else v for v in (fields[c] for c in cols)]
+        cur = self.conn.execute(
+            f"UPDATE team_tasks SET {', '.join(f'{c} = ?' for c in cols)} WHERE id = ? AND workspace_id = ?",
+            (*values, task_id, self.workspace_id),
+        )
+        self.conn.commit()
+        return cur.rowcount == 1
+
+    def team_tasks_done_between(self, start: datetime, end: datetime) -> list[sqlite3.Row]:
+        return self.conn.execute(
+            """SELECT * FROM team_tasks WHERE workspace_id = ? AND status = 'done'
+               AND done_at >= ? AND done_at < ?""",
+            (self.workspace_id, _iso(start), _iso(end)),
+        ).fetchall()
 
     # --- inbound WhatsApp ---------------------------------------------------
 

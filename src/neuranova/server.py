@@ -4,7 +4,8 @@ WhatsApp webhook: receives the founder's replies (send / edit / skip ...) from M
 
 Security:
 - Every POST must carry a valid X-Hub-Signature-256 made with the Meta app secret.
-- Only messages from WHATSAPP_RECIPIENT (the founder's own number) are acted on.
+- Only messages from known numbers are acted on: the founder (WHATSAPP_RECIPIENT) and active team
+  members with a WhatsApp number on their profile. Members get team-only commands and tools.
 - Meta retries deliveries, so each message id is processed once.
 """
 
@@ -26,7 +27,7 @@ from .commands import handle
 from .config import Settings
 from .dashboard import mount_dashboard
 from .db import Store
-from .notify import LAST_INBOUND_KEY
+from .notify import inbound_key
 
 log = logging.getLogger(__name__)
 
@@ -57,20 +58,24 @@ def message_text(msg: dict) -> str | None:
 
 def create_app(settings: Settings, agent_factory: Callable, store: Store | None = None) -> FastAPI:
     app = FastAPI(title="NeuraNova agent", docs_url=None, redoc_url=None, openapi_url=None)
-    mount_dashboard(app, settings, agent_factory)
     verify_token = settings.secret("WHATSAPP_VERIFY_TOKEN")
     app_secret = settings.secret("WHATSAPP_APP_SECRET")
     owner = _digits(settings.secret("WHATSAPP_RECIPIENT"))
     store = store or Store(settings.db_path, settings.workspace_id, settings.owner_id)
+    mount_dashboard(app, settings, agent_factory, store)
 
-    def process(text: str) -> None:
+    def process(text: str, user_id: str | None) -> None:
         agent = agent_factory()
+        user = agent.store.user(user_id) if user_id else None
         try:
-            reply = handle(agent, text, chat=lambda t: Assistant(agent).reply(t))
+            reply = handle(agent, text, chat=lambda t: Assistant(agent, user=user).reply(t), user=user)
         except Exception:
             log.exception("Command failed: %r", text[:80])
             reply = "Sorry, something went wrong handling that. Check the server log."
-        agent.notifier.send(reply)
+        if user is None or user["id"] == settings.owner_id:
+            agent.notifier.send(reply)
+        else:
+            agent.notify_user(user, reply)
 
     @app.get("/health")
     def health() -> dict:
@@ -98,15 +103,20 @@ def create_app(settings: Settings, agent_factory: Callable, store: Store | None 
                     if status.get("status") == "failed":
                         log.warning("WhatsApp delivery failed: %s", status.get("errors"))
                 for msg in value.get("messages", []):
-                    if _digits(msg.get("from")) != owner:
+                    sender = _digits(msg.get("from"))
+                    if sender == owner:
+                        user_id = settings.owner_id
+                    elif (member := store.user_by_whatsapp(sender)) is not None:
+                        user_id = member["id"]
+                    else:
                         log.warning("Ignored WhatsApp message from unknown number %s", msg.get("from"))
                         continue
                     if not store.first_time_seen(msg.get("id", "")):
                         continue
-                    store.put(LAST_INBOUND_KEY, datetime.now(timezone.utc).isoformat())
+                    store.put(inbound_key(msg.get("from", "")), datetime.now(timezone.utc).isoformat())
                     text = message_text(msg)
-                    store.log("whatsapp_in", type=msg.get("type"), text=(text or "")[:200])
-                    background.add_task(process, text or "help")
+                    store.log("whatsapp_in", user=user_id, type=msg.get("type"), text=(text or "")[:200])
+                    background.add_task(process, text or "help", user_id)
         return Response(status_code=200)
 
     return app

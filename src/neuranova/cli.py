@@ -39,6 +39,8 @@ def build_agent(settings: Settings):
 
     todoist_token = settings.secret("TODOIST_API_TOKEN")
     store = Store(settings.db_path, settings.workspace_id, settings.owner_id)
+    from .team import ensure_owner
+    ensure_owner(store, settings)
     return Agent(
         settings=settings,
         store=store,
@@ -46,6 +48,7 @@ def build_agent(settings: Settings):
         notifier=build_notifier(settings, store),
         mail=mail,
         todoist=TodoistConnector(todoist_token) if todoist_token else None,
+        notifier_factory=lambda number: build_notifier(settings, store, recipient=number),
     )
 
 
@@ -76,6 +79,8 @@ def run_forever(settings: Settings) -> None:
     sched.add_job(job("check_sla"), "interval", minutes=settings.sla_check_minutes, id="sla",
                   max_instances=1, coalesce=True)
     sched.add_job(job("task_reminders"), "interval", minutes=settings.task_reminder_minutes, id="tasks",
+                  max_instances=1, coalesce=True)
+    sched.add_job(job("team_reminders"), "interval", minutes=settings.task_reminder_minutes, id="team",
                   max_instances=1, coalesce=True)
     sched.add_job(job("morning_brief"), "cron", hour=settings.morning_brief.hour,
                   minute=settings.morning_brief.minute, id="brief", max_instances=1, coalesce=True)

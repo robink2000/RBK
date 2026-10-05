@@ -1,6 +1,6 @@
 # NeuraNova Agent
 
-A personal operations agent for NeuraNova. It watches your Gmail and Outlook inboxes and your Todoist tasks. It sends you alerts and a morning brief on WhatsApp, turns emails into tasks, drafts replies for you to approve, chats with you in plain language, and tracks progress on your three goals in a web dashboard.
+A personal operations agent for NeuraNova. It watches your Gmail and Outlook inboxes and your Todoist tasks. It sends you alerts and a morning brief on WhatsApp, turns emails into tasks, drafts replies for you to approve, chats with you in plain language, tracks progress on your three goals in a web dashboard, and runs a shared task board for your team.
 
 **Nothing is ever sent without your approval.** The agent can only send a reply after you text `send <number>` for that exact draft. It cannot delete or change email.
 
@@ -57,6 +57,37 @@ Reply: send 12 · edit 12 <your text> · redo 12 <what to change> · skip 12
 | `drafts` / `status` / `report` / `help` | List the waiting drafts, show what's waiting on you, show the latest weekly report, or list the commands. |
 
 `send` and `skip` only count as commands when the whole message is the word plus a number, like `send 12`. A sentence such as "send 2 brochures to Acme" goes to the chat assistant instead and never sends a draft.
+
+### Team
+
+Invite teammates from the dashboard's **Team** page. Each person gets a one-time link, sets their own password, and signs in with their email.
+
+| | Founder (admin) | Admin | Member |
+|---|---|---|---|
+| Goals, progress, charts, event log | ✓ | ✓ | ✓ |
+| Team board: add, assign, finish, block, hand over tasks | ✓ | ✓ | ✓ (their own tasks, or ones they created) |
+| Invite people, change roles, reset passwords, deactivate | ✓ | ✓ | – |
+| Founder's inbox, reply drafts, personal Todoist, agent activity | ✓ | – | – |
+
+**Team tasks** live in the agent itself, so teammates don't need Todoist. Your personal Todoist stays private.
+- A person gets a WhatsApp message when a task is assigned to them (if their number is on their profile).
+- They get a reminder 30 minutes before it's due.
+- When a task becomes overdue, the person *and* the admins are told once.
+- Marking a task **blocked** (with a reason) alerts the admins straight away.
+- You can **delegate an email** from "Waiting for your reply": it becomes a team task with the email's summary and next step. The email's content stays private.
+
+**Teammates on WhatsApp** message the same bot number:
+
+| They text | What happens |
+|---|---|
+| `tasks` / `team` | Their open tasks, or the whole team board |
+| `done 12` / `blocked 12 waiting for logo` / `reopen 12` | Update a task |
+| "give Sam the Globex invoice, due friday 5pm" | The chat assistant creates and assigns the task |
+| "delivered the Acme site on time" | Logged for the quality goal |
+
+Members' chat can't see your email, drafts or personal Todoist.
+
+The **weekly report** and **morning brief** include who finished what, who's overloaded, and anything overdue or blocked. The quality goal now also counts **team deadlines met**.
 
 ### Dashboard
 
@@ -119,6 +150,8 @@ src/neuranova/
   progress.py       goal metrics and weekly trends
   dashboard.py      web dashboard (login, goal cards, charts, drafts, tasks, events)
   charts.py         server-rendered SVG charts
+  team.py           people, invites, roles, passwords, team task rules
+  templates.py      dashboard HTML (home, team board, people, invites)
   server.py         web app: WhatsApp webhook + dashboard
   sla.py            business-hours deadline arithmetic
   db.py             SQLite storage (workspace/owner on every row - team-ready)
@@ -133,13 +166,14 @@ tests/              pytest suite (no network or API keys needed)
 - **Emails are treated as information, never as orders.** Email text is passed to Claude marked as data, and Claude is told never to follow instructions found inside it. Suspicious emails are flagged in their summary.
 - **Secrets stay out of git.** `.env`, `secrets/` and `data/` are ignored by git.
 - **Every action is recorded** in the `activity_log` table.
+- **Team access:** each person has their own login, and passwords are stored hashed (scrypt). Invite and reset links work once and expire after 7 days, and only a hash of each link is stored. Deactivating someone signs them out immediately. Roles are checked on the server for every action.
 - **Dashboard sign-in:** password with a 5-attempt lockout; a signed, HttpOnly, SameSite=Strict session cookie; a security token (CSRF) on every form; all page content escaped. The server listens only on `127.0.0.1` behind Caddy's HTTPS.
 
 ## Roadmap
 
 - ~~Phase 2: turn emails into Todoist tasks, plus draft replies you approve on WhatsApp~~ ✅
 - ~~Phase 3: web dashboard with NeuraNova progress tracking, plus two-way WhatsApp chat ("remind me to…")~~ ✅
-- **Phase 4:** team workspace: invites, task assignment and a team dashboard
+- ~~Phase 4: team workspace: invites, task assignment and a team dashboard~~ ✅
 
 ## Tests
 

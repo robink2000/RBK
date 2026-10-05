@@ -88,7 +88,7 @@ def test_chat_creates_reminder_with_tool(settings, store):
     assert todo.added == [("Call Asha", "", "friday 3pm", 4)]
     tool_result = client.calls[1][-1]["content"][0]
     assert tool_result["tool_use_id"] == "tu1" and "Call Asha" in tool_result["content"]
-    assert [r["role"] for r in store.recent_chat()] == ["founder", "agent"]
+    assert [r["role"] for r in store.recent_chat()] == ["founder", "agent>founder"]
 
 
 def test_chat_logs_event_and_reports_tool_errors(settings, store):
@@ -145,7 +145,8 @@ def dashboard_client(tmp_path):
 
 
 def login(client):
-    return client.post("/login", data={"password": "hunter2-long-password"}, follow_redirects=False)
+    return client.post("/login", data={"email": "owner", "password": "hunter2-long-password"},
+                       follow_redirects=False)
 
 
 def csrf_of(html):
@@ -156,8 +157,8 @@ def test_dashboard_requires_login_and_throttles(tmp_path):
     client, _, _ = dashboard_client(tmp_path)
     assert client.get("/", follow_redirects=False).headers["location"] == "/login"
     for _ in range(5):
-        assert client.post("/login", data={"password": "nope"}).status_code == 401
-    assert client.post("/login", data={"password": "hunter2-long-password"}).status_code == 429
+        assert client.post("/login", data={"email": "owner", "password": "nope"}).status_code == 401
+    assert client.post("/login", data={"email": "owner", "password": "hunter2-long-password"}).status_code == 429
 
 
 def test_dashboard_renders_and_escapes(tmp_path):

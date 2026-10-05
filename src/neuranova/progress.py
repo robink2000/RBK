@@ -2,7 +2,7 @@
 
 - Develop the business: new leads (from email triage) plus logged meetings, proposals and deals.
 - Give proper responses: share of client/lead/partner emails answered within the reply promise.
-- Deliver high quality: deliveries on time vs late, rework, client feedback.
+- Deliver high quality: deliveries on time vs late, team task deadlines met, rework, client feedback.
 """
 
 from __future__ import annotations
@@ -75,6 +75,11 @@ def compute(store: Store, tz, days: int = 7, now: datetime | None = None) -> dic
 
     deliveries = count["delivery_on_time"] + count["delivery_late"]
     delivery_pct = _pct(count["delivery_on_time"], deliveries)
+    done = [t for t in store.team_tasks_done_between(start, now) if t["due_at"]]
+    tasks_on_time = sum(1 for t in done if row_dt(t["done_at"]) <= row_dt(t["due_at"]))
+    tasks_pct = _pct(tasks_on_time, len(done))
+    measured = [p for p in (delivery_pct, tasks_pct) if p is not None]
+    quality_pct = min(measured) if measured else None
     decided = count["deal_won"] + count["deal_lost"]
 
     return {
@@ -99,11 +104,15 @@ def compute(store: Store, tz, days: int = 7, now: datetime | None = None) -> dic
             "deliveries_on_time": count["delivery_on_time"],
             "deliveries_late": count["delivery_late"],
             "on_time_pct": delivery_pct,
+            "team_tasks_on_time": tasks_on_time,
+            "team_tasks_late": len(done) - tasks_on_time,
+            "team_tasks_on_time_pct": tasks_pct,
+            "overall_on_time_pct": quality_pct,  # the weaker of deliveries and team deadlines
             "rework": count["rework"],
             "feedback_positive": count["feedback_positive"],
             "feedback_negative": count["feedback_negative"],
             "status": "critical" if count["feedback_negative"] > count["feedback_positive"]
-                      else status_for(delivery_pct) if deliveries else "none",
+                      else status_for(quality_pct),
         },
     }
 
@@ -130,5 +139,28 @@ def weekly_series(store: Store, tz, weeks: int = 8, now: datetime | None = None)
             "replies_due": len(due),
             "on_time_pct": _pct(ok, len(due)),
             "deals_won": sum(1 for e in events if e["kind"] == "deal_won"),
+        })
+    return out
+
+
+def team_stats(store: Store, days: int = 7, now: datetime | None = None) -> list[dict]:
+    """Per active member: open, blocked, overdue now, done in the period, done on time %."""
+    now = now or datetime.now(timezone.utc)
+    start = now - timedelta(days=days)
+    done = store.team_tasks_done_between(start, now)
+    open_tasks = store.team_tasks("open")
+    out = []
+    for u in store.users():
+        mine_open = [t for t in open_tasks if t["assignee_id"] == u["id"]]
+        mine_done = [t for t in done if t["assignee_id"] == u["id"]]
+        with_due = [t for t in mine_done if t["due_at"]]
+        on_time = sum(1 for t in with_due if row_dt(t["done_at"]) <= row_dt(t["due_at"]))
+        out.append({
+            "id": u["id"], "name": u["name"], "role": u["role"],
+            "open": len(mine_open),
+            "blocked": sum(1 for t in mine_open if t["status"] == "blocked"),
+            "overdue": sum(1 for t in mine_open if t["due_at"] and row_dt(t["due_at"]) < now),
+            "done": len(mine_done),
+            "on_time_pct": _pct(on_time, len(with_due)),
         })
     return out

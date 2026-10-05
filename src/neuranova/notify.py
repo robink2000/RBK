@@ -97,24 +97,38 @@ class WhatsAppNotifier:
                 raise RuntimeError(f"WhatsApp send failed ({resp.status_code}): {resp.text[:500]}")
 
 
-def session_open(store) -> Callable[[], bool]:
-    """True while we are inside WhatsApp's 24h window after the founder's last message."""
+def inbound_key(number: str) -> str:
+    return f"{LAST_INBOUND_KEY}:{re.sub(r'[^0-9]', '', number or '')}"
+
+
+def session_open(store, number: str) -> Callable[[], bool]:
+    """True while we are inside WhatsApp's 24h window after this person's last message."""
     def check() -> bool:
-        last = store.get(LAST_INBOUND_KEY)
+        last = store.get(inbound_key(number))
         return bool(last) and datetime.now(timezone.utc) - datetime.fromisoformat(last) < SESSION_WINDOW
     return check
 
 
-def build_notifier(settings, store=None) -> Notifier:
+class LabelledConsole(ConsoleNotifier):
+    def __init__(self, who: str):
+        self.who = who
+
+    def send(self, text: str, teaser: str | None = None) -> None:
+        super().send(f"[to {self.who}]\n{text}")
+
+
+def build_notifier(settings, store=None, recipient: str | None = None) -> Notifier:
+    """Notifier for the founder (default) or for another team member's WhatsApp number."""
     channel = (settings.secret("NOTIFY_CHANNEL") or "console").lower()
+    number = recipient or settings.secret("WHATSAPP_RECIPIENT")
     if channel == "whatsapp":
         return WhatsAppNotifier(
             token=settings.secret("WHATSAPP_ACCESS_TOKEN"),
             phone_number_id=settings.secret("WHATSAPP_PHONE_NUMBER_ID"),
-            recipient=settings.secret("WHATSAPP_RECIPIENT"),
+            recipient=number,
             template=settings.secret("WHATSAPP_TEMPLATE_NAME") or "neuranova_update",
             language=settings.secret("WHATSAPP_TEMPLATE_LANG") or "en",
             api_version=settings.secret("WHATSAPP_API_VERSION") or "v22.0",
-            window_open=session_open(store) if store is not None else (lambda: False),
+            window_open=session_open(store, number) if store is not None else (lambda: False),
         )
-    return ConsoleNotifier()
+    return LabelledConsole(recipient) if recipient else ConsoleNotifier()
