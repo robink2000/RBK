@@ -11,20 +11,21 @@ BASE = """<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{ brand.name }}</title>
 <link rel="manifest" href="/manifest.webmanifest">
-<link rel="icon" href="{{ brand.logo_url or '/icon.svg' }}">
+<link rel="icon" href="/brand/logo">
+<link rel="apple-touch-icon" href="/brand/logo">
 <meta name="theme-color" content="{{ brand.accent }}">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <style>
-/* NeuraNova: a quiet violet-tinted workspace; the brand shows in the header mark,
-   the violet accent and the gold "nova" spark. Everything else stays calm for scanning. */
+/* NeuraNova: calm, lightly violet-tinted surfaces for scanning; the brand lives in the logo, the
+   purple accent (taken from the logo's "N") and the logo's orange-to-blue gradient as a strip on top. */
 :root {
   color-scheme: light;
-  --page: #f6f5fb; --surface: #ffffff; --ink: #15122b; --ink-2: #4b4862; --muted: #85829b;
-  --grid: #e5e3f0; --axis: #c8c5d9; --border: rgba(21,18,43,0.10);
+  --page: #f7f5fa; --surface: #ffffff; --ink: #1a1426; --ink-2: #4f4760; --muted: #877f96;
+  --grid: #e8e4ef; --axis: #cbc4d8; --border: rgba(26,20,38,0.10);
   --accent: {{ brand.accent }}; --accent-ink: #ffffff; --series-1: {{ brand.accent }};
-  --spark: #eda100; --mark-bg: #1d1640;
+  --brand-gradient: linear-gradient(90deg, #ee6e1c, #f04818 18%, #b43c46 34%, #a50f81 50%, #780090 66%, #2d5baf 84%, #3683c2);
   --good: #0ca30c; --good-ink: #006300; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b;
   --font-display: "Sora", "Segoe UI", system-ui, sans-serif;
   --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -32,25 +33,26 @@ BASE = """<!doctype html>
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --page: #0e0c1a; --surface: #17142a; --ink: #f4f3fb; --ink-2: #c4c1d9; --muted: #8d8aa6;
-    --grid: #2a2640; --axis: #3a3655; --border: rgba(244,243,251,0.10);
-    --accent: {{ brand.accent_dark }}; --accent-ink: #0e0c1a; --series-1: {{ brand.accent_dark }};
-    --spark: #f5b83d; --mark-bg: #2a2150; --good-ink: #0ca30c;
+    --page: #110d19; --surface: #1a1426; --ink: #f5f2fa; --ink-2: #c9c1d8; --muted: #8f87a0;
+    --grid: #2d2639; --axis: #3d3550; --border: rgba(245,242,250,0.10);
+    --accent: {{ brand.accent_dark }}; --accent-ink: #110d19; --series-1: {{ brand.accent_dark }};
+    --good-ink: #0ca30c;
   }
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --page: #0e0c1a; --surface: #17142a; --ink: #f4f3fb; --ink-2: #c4c1d9; --muted: #8d8aa6;
-  --grid: #2a2640; --axis: #3a3655; --border: rgba(244,243,251,0.10);
-  --accent: {{ brand.accent_dark }}; --accent-ink: #0e0c1a; --series-1: {{ brand.accent_dark }};
-  --spark: #f5b83d; --mark-bg: #2a2150; --good-ink: #0ca30c;
+  --page: #110d19; --surface: #1a1426; --ink: #f5f2fa; --ink-2: #c9c1d8; --muted: #8f87a0;
+  --grid: #2d2639; --axis: #3d3550; --border: rgba(245,242,250,0.10);
+  --accent: {{ brand.accent_dark }}; --accent-ink: #110d19; --series-1: {{ brand.accent_dark }};
+  --good-ink: #0ca30c;
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--page); color: var(--ink); font: 15px/1.5 var(--font-body); }
 h1, h2, .hero, .brand-name { font-family: var(--font-display); text-wrap: balance; }
 h2 { letter-spacing: -0.005em; }
 .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--ink); }
-.brand svg, .brand img { width: 36px; height: 36px; flex: none; border-radius: 10px; }
+.brand img { width: 40px; height: 40px; flex: none; object-fit: contain; }
+.brand-strip { height: 4px; background: var(--brand-gradient); }
 .brand-name { font-size: 20px; font-weight: 700; letter-spacing: -0.01em; line-height: 1.1; }
 .brand-name .nova { color: var(--accent); }
 .brand-tag { color: var(--muted); font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; }
@@ -125,7 +127,7 @@ nav.top a.on { background: color-mix(in srgb, var(--accent) 14%, transparent); c
 .muted-row td { color: var(--muted); }
 </style>
 </head>
-<body><main>{% block body %}{% endblock %}</main></body>
+<body><div class="brand-strip" aria-hidden="true"></div><main>{% block body %}{% endblock %}</main></body>
 </html>"""
 
 LOGIN = """{% extends "base" %}{% from "nav" import brand_logo, brand_wordmark with context %}{% block body %}
@@ -143,7 +145,7 @@ LOGIN = """{% extends "base" %}{% from "nav" import brand_logo, brand_wordmark w
 </div>
 {% endblock %}"""
 
-NAV = """{% macro brand_logo() %}{% if brand.logo_url %}<img src="{{ brand.logo_url }}" alt="">{% else %}""" + "{{ mark|safe }}" + """{% endif %}{% endmacro %}
+NAV = """{% macro brand_logo() %}<img src="/brand/logo" alt="{{ brand.name }} logo" width="40" height="40">{% endmacro %}
 {% macro brand_wordmark() %}{% if brand.name == 'NeuraNova' %}Neura<span class="nova">Nova</span>{% else %}{{ brand.name }}{% endif %}{% endmacro %}
 {% macro top(page, user, csrf, today) %}
 <header>
@@ -338,25 +340,11 @@ DASHBOARD = """{% extends "base" %}{% from "chart" import chart %}{% from "nav" 
 {% endif %}
 {% endblock %}"""
 
-# The NeuraNova mark: a four-point "nova" star at the centre of a ring of connected nodes.
-MARK = """<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="NeuraNova logo">
-<rect width="64" height="64" rx="16" fill="var(--mark-bg, #1d1640)"/>
-<circle cx="32" cy="32" r="19" fill="none" stroke="#9085e9" stroke-width="1.6" opacity="0.55"/>
-<g stroke="#9085e9" stroke-width="1.4" opacity="0.8"><line x1="32" y1="32" x2="45.4" y2="18.6"/><line x1="32" y1="32" x2="15.6" y2="41.5"/><line x1="32" y1="32" x2="44" y2="46.6"/></g>
-<g fill="#b9b0ff"><circle cx="45.4" cy="18.6" r="3"/><circle cx="15.6" cy="41.5" r="3"/><circle cx="44" cy="46.6" r="2.4"/></g>
-<path d="M32 13.5C33.6 25.6 38.4 30.4 50.5 32C38.4 33.6 33.6 38.4 32 50.5C30.4 38.4 25.6 33.6 13.5 32C25.6 30.4 30.4 25.6 32 13.5Z" fill="var(--spark, #f5b83d)"/>
-<circle cx="32" cy="32" r="3.2" fill="#ffffff"/>
-</svg>"""
-
-# Same mark with fixed colors, for the browser tab and home-screen icon (no page CSS there).
-ICON = MARK.replace("var(--mark-bg, #1d1640)", "#1d1640").replace("var(--spark, #f5b83d)", "#f5b83d")
-
-
 def manifest(brand) -> dict:
     return {
         "name": brand["name"], "short_name": brand["name"], "start_url": "/", "display": "standalone",
-        "background_color": "#0e0c1a", "theme_color": brand["accent"],
-        "icons": [{"src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"}],
+        "background_color": "#ffffff", "theme_color": brand["accent"],
+        "icons": [{"src": "/brand/logo", "sizes": "256x256", "type": "image/png", "purpose": "any"}],
     }
 
 
@@ -479,6 +467,5 @@ env = Environment(
                        "join": JOIN, "link": LINK, "team": TEAM}),
     autoescape=select_autoescape(default=True, default_for_string=True),
 )
-env.globals["mark"] = MARK
-env.globals["brand"] = {"name": "NeuraNova", "tagline": "Operations console", "accent": "#4a3aa7",
-                        "accent_dark": "#9085e9", "logo_url": ""}
+env.globals["brand"] = {"name": "NeuraNova", "tagline": "Operations console", "accent": "#6b1fa3",
+                        "accent_dark": "#a06ad9"}

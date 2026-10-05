@@ -120,8 +120,8 @@ def load_settings(config_path: str | Path | None = None, env: dict[str, str] | N
         brand={
             "name": brand.get("name", "NeuraNova"),
             "tagline": brand.get("tagline", "Operations console"),
-            "accent": _color(brand.get("accent"), "#4a3aa7"),
-            "accent_dark": _color(brand.get("accent_dark"), "#9085e9"),
+            "accent": _color(brand.get("accent"), "#6b1fa3"),
+            "accent_dark": _color(brand.get("accent_dark"), "#a06ad9"),
             "logo": brand.get("logo", ""),
         },
         model=env.get("NEURANOVA_MODEL") or DEFAULT_MODEL,

@@ -30,11 +30,12 @@ from .db import row_dt
 from .progress import EVENT_KINDS, compute, team_stats, weekly_series
 from .team import (TeamError, accept_invite, authenticate, can_change, create_invite, create_reset_link,
                    ensure_owner, parse_due, set_active, token_hash)
-from .templates import ICON, env, manifest as build_manifest
+from .templates import env, manifest as build_manifest
 
 log = logging.getLogger(__name__)
 
 COOKIE = "nn_session"
+BUILTIN_LOGO = Path(__file__).parent / "static" / "neuranova-logo.png"
 LOGO_TYPES = {".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
               ".webp": "image/webp"}
 SESSION_SECONDS = 14 * 24 * 3600
@@ -85,11 +86,13 @@ def mount_dashboard(app: FastAPI, settings: Settings, agent_factory: Callable, s
     public_url = settings.secret("PUBLIC_URL").rstrip("/")
     sessions = Sessions(secret) if secret else None
     brand = dict(settings.brand or {}) or dict(env.globals["brand"])
-    logo_path = Path(brand.get("logo") or "")
-    logo_type = LOGO_TYPES.get(logo_path.suffix.lower())
-    brand["logo_url"] = "/brand/logo" if brand.get("logo") and logo_type and logo_path.is_file() else ""
-    if brand.get("logo") and not brand["logo_url"]:
-        log.warning("Brand logo %s not found or not .svg/.png/.jpg/.webp; using the built-in mark", logo_path)
+    logo_path, logo_type = BUILTIN_LOGO, "image/png"
+    if brand.get("logo"):
+        custom = Path(brand["logo"])
+        if custom.is_file() and custom.suffix.lower() in LOGO_TYPES:
+            logo_path, logo_type = custom, LOGO_TYPES[custom.suffix.lower()]
+        else:
+            log.warning("Brand logo %s not found or not .svg/.png/.jpg/.webp; using the NeuraNova logo", custom)
     env.globals["brand"] = brand
     failures: dict[str, list[float]] = {}
     if store is not None and settings.secret("DASHBOARD_PASSWORD"):
@@ -139,21 +142,15 @@ def mount_dashboard(app: FastAPI, settings: Settings, agent_factory: Callable, s
     @app.get("/manifest.webmanifest")
     def manifest() -> Response:
         data = build_manifest(brand)
-        if brand["logo_url"]:
+        if logo_path != BUILTIN_LOGO:
             data["icons"] = [{"src": "/brand/logo", "sizes": "any", "type": logo_type}]
         return Response(json.dumps(data), media_type="application/manifest+json")
 
     @app.get("/brand/logo")
     def brand_logo() -> Response:
-        if not brand["logo_url"]:
-            return Response(status_code=404)
         return Response(logo_path.read_bytes(), media_type=logo_type,
                         headers={"Cache-Control": "public, max-age=3600",
                                  "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'"})
-
-    @app.get("/icon.svg")
-    def icon() -> Response:
-        return Response(ICON, media_type="image/svg+xml")
 
     # --- sign in / out / join -------------------------------------------------
 

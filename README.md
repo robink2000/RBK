@@ -166,7 +166,8 @@ src/neuranova/
   dashboard.py      web dashboard (login, goal cards, charts, drafts, tasks, events)
   charts.py         server-rendered SVG charts
   team.py           people, invites, roles, passwords, team task rules
-  templates.py      dashboard HTML, NeuraNova theme and logo
+  templates.py      dashboard HTML and the NeuraNova theme
+  static/           the NeuraNova logo
   demo.py           `neuranova demo`: the console with sample data, offline
   server.py         web app: WhatsApp webhook + dashboard
   sla.py            business-hours deadline arithmetic
@@ -178,18 +179,22 @@ tests/              pytest suite (no network or API keys needed)
 
 ## Your brand
 
-The console uses the NeuraNova theme: a violet accent, a gold "nova" star logo, and light and dark modes. To change it, edit `[brand]` in `neuranova.toml`:
+The console uses the NeuraNova logo and colors from the NeuraNova Classroom app:
+- the brain-"N" logo appears in the header, on the sign-in page, in the browser tab, and as the home-screen icon
+- the purple of the logo's "N" is used for buttons, links and charts
+- the logo's orange-to-blue gradient runs as a thin strip across the top of every page
+- light and dark modes are both supported
+
+To change any of it, edit `[brand]` in `neuranova.toml`:
 
 ```toml
 [brand]
 name = "NeuraNova"
 tagline = "Operations console"
-accent = "#4a3aa7"        # light theme
-accent_dark = "#9085e9"   # dark theme
-logo = "brand/logo.svg"   # your own logo (.svg, .png, .jpg or .webp)
+accent = "#6b1fa3"        # light theme
+accent_dark = "#a06ad9"   # dark theme
+logo = "my-logo.png"      # optional: replace the built-in logo (.svg, .png, .jpg or .webp)
 ```
-
-The built-in mark is also saved as `brand/neuranova-mark.svg` for slides, email signatures and so on.
 
 ## Safety
 
