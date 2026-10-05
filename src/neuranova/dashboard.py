@@ -520,7 +520,7 @@ def mount_dashboard(app: FastAPI, settings: Settings, agent_factory: Callable, s
         agent, me = g
         cards = integ.view(settings, agent.store, base_url(request))
         return page("integrations", me=me, csrf=sessions.csrf(request.cookies.get(COOKIE, "")), today=today_text(),
-                    msg=msg, cards=cards, progress=integ.summary(cards))
+                    msg=msg, cards=cards, progress=integ.summary(cards), ai=integ.ai_choice(settings, agent.store))
 
     def form_values(name: str, form) -> dict:
         allowed = {f.key: f for f in integ.BY_NAME[name].fields}
@@ -545,6 +545,18 @@ def mount_dashboard(app: FastAPI, settings: Settings, agent_factory: Callable, s
         results = [integ.run_check(c.name, settings, agent.store)[0]
                    for c in integ.CATALOG if integ.is_configured(c.name, merged)]
         return back("/integrations", f"Tested {len(results)}: {sum(results)} working, {len(results) - sum(results)} need attention.")
+
+    @app.post("/integrations/ai/provider")
+    def ai_provider(request: Request, csrf: str = Form(""), provider: str = Form("")) -> Response:
+        g = founder(request, csrf)
+        if isinstance(g, Response):
+            return g
+        agent, me = g
+        if provider not in ("claude", "openai"):
+            return back("/integrations#ai", "Choose Claude or OpenAI.")
+        integ.save_values(agent.store, settings, "ai", {"AI_PROVIDER": provider}, me["id"])
+        agent.store.log("ai_provider_changed", provider=provider, by=me["id"])
+        return back("/integrations#ai", f"The PA now uses {'OpenAI' if provider == 'openai' else 'Claude'}.")
 
     @app.post("/integrations/email/detect")
     def email_detect(request: Request, csrf: str = Form(""), address: str = Form("")) -> Response:

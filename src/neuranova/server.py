@@ -57,6 +57,23 @@ def message_text(msg: dict) -> str | None:
     return None
 
 
+def record_contact_message(store: Store, number: str, name: str, msg: dict) -> int | None:
+    """Save a WhatsApp message from a contact for the PA to analyze."""
+    text = message_text(msg) or {"image": "[photo]", "document": "[document]", "audio": "[voice note]",
+                                 "video": "[video]", "location": "[location]"}.get(msg.get("type"), "[message]")
+    if msg.get("type") in ("image", "document", "video") and (msg.get(msg["type"]) or {}).get("caption"):
+        text += " " + msg[msg["type"]]["caption"]
+    try:
+        at = datetime.fromtimestamp(int(msg.get("timestamp")), timezone.utc)
+    except (TypeError, ValueError):
+        at = datetime.now(timezone.utc)
+    contact_id = store.pa.contact_for(name=name, phone=number)
+    message_id = store.pa.add_message("whatsapp", "in", msg.get("id", ""), text, at, sender=number,
+                                      contact_id=contact_id)
+    store.log("whatsapp_contact_in", contact=contact_id, chars=len(text))
+    return message_id
+
+
 def create_app(settings: Settings, agent_factory: Callable, store: Store | None = None) -> FastAPI:
     app = FastAPI(title="NeuraNova agent", docs_url=None, redoc_url=None, openapi_url=None)
     store = store or Store(settings.db_path, settings.workspace_id, settings.owner_id)
@@ -108,6 +125,8 @@ def create_app(settings: Settings, agent_factory: Callable, store: Store | None 
                 for status in value.get("statuses", []):
                     if status.get("status") == "failed":
                         log.warning("WhatsApp delivery failed: %s", status.get("errors"))
+                names = {_digits(c.get("wa_id")): (c.get("profile") or {}).get("name", "")
+                         for c in value.get("contacts", [])}
                 for msg in value.get("messages", []):
                     sender = _digits(msg.get("from"))
                     if sender == owner:
@@ -115,7 +134,11 @@ def create_app(settings: Settings, agent_factory: Callable, store: Store | None 
                     elif (member := store.user_by_whatsapp(sender)) is not None:
                         user_id = member["id"]
                     else:
-                        log.warning("Ignored WhatsApp message from unknown number %s", msg.get("from"))
+                        # Someone outside the team (parent, student, customer...): their message is data
+                        # for the PA to understand. It is never treated as a command.
+                        if store.first_time_seen(msg.get("id", "")):
+                            store.put(inbound_key(sender), datetime.now(timezone.utc).isoformat())
+                            record_contact_message(store, sender, names.get(sender, ""), msg)
                         continue
                     if not store.first_time_seen(msg.get("id", "")):
                         continue

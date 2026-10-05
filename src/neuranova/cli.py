@@ -61,14 +61,13 @@ def build_agent(settings: Settings):
         except Exception as exc:
             log.warning("Outlook disabled: %s", exc)
 
-    import anthropic
+    from .ai import build_llm
 
     todoist_token = settings.secret("TODOIST_API_TOKEN")
-    api_key = settings.secret("ANTHROPIC_API_KEY")
     return Agent(
         settings=settings,
         store=store,
-        brain=Brain(settings.model, settings.goals, client=anthropic.Anthropic(api_key=api_key or None),
+        brain=Brain(settings.model, settings.goals, llm=build_llm(settings),
                     tone=settings.reply_tone, signature=settings.reply_signature),
         notifier=build_notifier(settings, store),
         mail=mail,

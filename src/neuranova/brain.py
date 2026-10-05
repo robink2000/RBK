@@ -20,7 +20,6 @@ from .models import CATEGORIES, PRIORITIES, Draft, Triage
 
 log = logging.getLogger(__name__)
 
-FALLBACK_BETA = "server-side-fallback-2026-07-01"
 
 TRIAGE_SYSTEM = """You triage the inbox of the founder of NeuraNova.
 
@@ -127,8 +126,7 @@ Rules:
 - Only use the data given. Under 1500 characters."""
 
 
-class ModelRefused(RuntimeError):
-    pass
+from .ai import FALLBACK_BETA, ModelRefused  # noqa: E402,F401  (re-exported)
 
 
 def goals_text(goals: tuple[Goal, ...]) -> str:
@@ -144,32 +142,21 @@ class EmailForTriage:
 
 
 class Brain:
-    def __init__(self, model: str, goals: tuple[Goal, ...], client: anthropic.Anthropic | None = None,
-                 tone: str = "", signature: str = ""):
-        self.client = client or anthropic.Anthropic()
+    def __init__(self, model: str, goals: tuple[Goal, ...], client=None, tone: str = "", signature: str = "",
+                 llm=None):
+        from .ai import ClaudeLLM
+
+        self.llm = llm or ClaudeLLM(model, client=client)
+        self.client = getattr(self.llm, "client", None)
         self.model = model
         self.goals = goals
         self.tone = tone or "Warm, professional and concise."
         self.signature = signature or "Best regards"
 
     def _call(self, system: str, user: str, *, effort: str, max_tokens: int, schema: dict | None = None) -> str:
-        output_config: dict = {"effort": effort}
         if schema:
-            output_config["format"] = {"type": "json_schema", "schema": schema}
-        response = self.client.beta.messages.create(
-            model=self.model,
-            max_tokens=max_tokens,
-            system=system,
-            messages=[{"role": "user", "content": user}],
-            output_config=output_config,
-            betas=[FALLBACK_BETA],
-            fallbacks="default",
-        )
-        if response.stop_reason == "refusal":
-            raise ModelRefused(str(response.stop_details))
-        if response.stop_reason == "max_tokens":
-            raise RuntimeError("Claude response was cut off (max_tokens)")
-        return "".join(b.text for b in response.content if b.type == "text")
+            return json.dumps(self.llm.json(system, user, schema, effort=effort, max_tokens=max_tokens))
+        return self.llm.text(system, user, effort=effort, max_tokens=max_tokens)
 
     def triage(self, emails: list[EmailForTriage]) -> dict[int, Triage]:
         if not emails:

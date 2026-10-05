@@ -60,7 +60,12 @@ def test_owner_message_runs_command_once(tmp_path):
     assert store.get(inbound_key(OWNER)) is not None                       # opens the 24h window
 
 
-def test_strangers_are_ignored(tmp_path):
+def test_contacts_are_recorded_as_data_never_commands(tmp_path):
     client, store, sent = setup(tmp_path)
-    assert post(client, inbound("15550001111", "send 1")).status_code == 200
-    assert sent == [] and store.get(inbound_key(OWNER)) is None
+    payload = inbound("15550001111", "send 1")
+    payload["entry"][0]["changes"][0]["value"]["contacts"] = [{"wa_id": "15550001111", "profile": {"name": "Asha"}}]
+    assert post(client, payload).status_code == 200
+    assert post(client, payload).status_code == 200                       # Meta retry: stored once
+    assert sent == [] and store.get(inbound_key(OWNER)) is None            # no command ran, no reply
+    [m] = store.pa.messages()
+    assert m["body"] == "send 1" and m["direction"] == "in" and m["contact_name"] == "Asha"

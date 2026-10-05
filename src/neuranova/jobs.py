@@ -77,8 +77,7 @@ class Agent:
         self.store.close_drafts_for_replied()
         if self.settings.instant_high_priority:
             self.alert_high_priority()
-        if self.settings.auto_create_tasks and self.todoist:
-            stats["tasks"] = self.create_tasks()
+        stats["pa"] = self.analyze_communications()
         if self.settings.drafts_enabled:
             stats["drafts"] = self.draft_replies()
         self.store.log("check_inbox", **stats)
@@ -117,6 +116,69 @@ class Agent:
                 self.notifier.send("\n".join(lines))
                 self.store.log("alert_high_priority", email_id=r["id"])
             self.store.mark_alerted(r["id"])
+
+    # --- PA: understand communication and keep work items current ------------------------
+
+    @property
+    def pa(self):
+        return self.store.pa
+
+    def _find_owner(self, hint: str):
+        from .team import find_member
+        return find_member(self.store, hint)
+
+    def analyze_communications(self, limit: int = 10) -> int:
+        """Run the PA's analysis on new important emails and WhatsApp messages from contacts."""
+        from .brain import goals_text
+        from .pa.comms import Incoming, process_message
+
+        llm = getattr(self.brain, "llm", None)
+        if llm is None or not hasattr(llm, "json"):
+            return 0
+        team = [u["name"] for u in self.store.users()]
+        goals = goals_text(self.settings.goals)
+        done = 0
+        for r in self.store.emails_for_pa(limit):
+            conn = self.connector(r["source"])
+            body = r["snippet"]
+            try:
+                if conn is not None:
+                    body = conn.fetch_body(r["external_id"]) or body
+            except Exception:
+                log.warning("Could not fetch the full email %s; using the preview", r["id"])
+            from email.utils import parseaddr
+            name, addr = parseaddr(r["sender"])
+            contact_id = self.pa.contact_for(name=name, email=addr)
+            msg = Incoming("email", str(r["id"]), r["sender"], r["subject"], body, row_dt(r["received_at"]),
+                           contact_id=contact_id, link=r["link"])
+            try:
+                out = process_message(llm, self.pa, msg, goals=goals, tz=self.settings.tz,
+                                      end_of_day=self.settings.working_hours.end, team=team,
+                                      find_owner=self._find_owner)
+            except Exception:
+                log.exception("PA analysis failed for email %s", r["id"])
+                continue
+            self.store.mark_email_pa(r["id"])
+            self.store.log("pa_analyzed", channel="email", ref=r["id"], changes=out.applied)
+            done += 1
+        for m in self.pa.unanalyzed_messages(limit):
+            text = (m["body"] or "").strip()
+            if len(text) < 4 or not any(ch.isalnum() for ch in text):
+                self.pa.mark_analyzed(m["id"], text, "none")  # "ok", emoji: nothing to track
+                continue
+            msg = Incoming(m["channel"], str(m["id"]), m["contact_name"] or m["sender"], m["subject"], text,
+                           row_dt(m["at"]), contact_id=m["contact_id"])
+            try:
+                out = process_message(llm, self.pa, msg, goals=goals, tz=self.settings.tz,
+                                      end_of_day=self.settings.working_hours.end, team=team,
+                                      find_owner=self._find_owner)
+            except Exception:
+                log.exception("PA analysis failed for message %s", m["id"])
+                continue
+            self.pa.mark_analyzed(m["id"], out.summary, out.importance)
+            self.store.log("pa_analyzed", channel=m["channel"], ref=m["id"], changes=out.applied)
+            done += 1
+        return done
 
     # --- email -> Todoist ----------------------------------------------------
 

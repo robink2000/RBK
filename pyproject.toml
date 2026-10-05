@@ -17,6 +17,7 @@ dependencies = [
     "python-multipart>=0.0.9",
     "cryptography>=42",
     "tzdata>=2024.1",  # timezone database; Windows has none built in
+    "openai>=1.40",
 ]
 
 [project.optional-dependencies]

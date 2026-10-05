@@ -110,7 +110,7 @@ def test_chat_logs_event_and_reports_tool_errors(settings, store):
 def test_chat_has_no_email_sending_tool():
     names = {t["name"] for t in TOOLS}
     assert not any("send" in n or "email" in n and n != "search_email" for n in names)
-    assert all(t["strict"] and t["input_schema"]["additionalProperties"] is False for t in TOOLS)
+    assert all(set(t) == {"name", "description", "properties"} for t in TOOLS)
 
 
 def test_sentences_are_not_mistaken_for_draft_commands(settings, store):

@@ -79,6 +79,18 @@ CATALOG: tuple[Integration, ...] = (
         links=(("Claude Console", "https://console.anthropic.com/settings/keys"),),
     ),
     Integration(
+        "openai", "OpenAI", "AI",
+        "An alternative AI for the PA. Use it instead of Claude if you prefer.",
+        ("Email triage", "Reply drafts", "Briefings", "Chat"),
+        fields=(Field("OPENAI_API_KEY", "API key", secret=True, placeholder="sk-..."),
+                Field("OPENAI_MODEL", "Model", placeholder="gpt-4.1",
+                      help="The model name from your OpenAI account, e.g. gpt-4.1. Test checks it exists.")),
+        steps=("Open the OpenAI platform and sign in.", "Go to API keys and create a key named NeuraNova.",
+               "Paste it here with the model name and press Save & test.",
+               "Choose which AI the PA uses with the switch above the AI cards."),
+        links=(("OpenAI API keys", "https://platform.openai.com/api-keys"),),
+    ),
+    Integration(
         "gmail", "Gmail with Google sign-in", "Email (advanced)",
         "Only if your company turned off app passwords. Needs a one-time app on Google Cloud.",
         ("Inbox triage", "4-hour reply tracking", "Reply drafts"),
@@ -234,6 +246,15 @@ def test_integration(name: str, settings, store: Store) -> tuple[bool, str, str 
                 return False, "Add an API key.", None
             model = anthropic.Anthropic(api_key=s("ANTHROPIC_API_KEY")).models.retrieve(settings.model)
             return True, f"Key works. Using {model.display_name}.", None
+        if name == "openai":
+            if not s("OPENAI_API_KEY"):
+                return False, "Add an API key.", None
+            if not s("OPENAI_MODEL"):
+                return False, "Add the model name.", None
+            from openai import OpenAI
+
+            model = OpenAI(api_key=s("OPENAI_API_KEY")).models.retrieve(s("OPENAI_MODEL"))
+            return True, f"Key works. Model {model.id} is available.", None
         if name == "email":
             conn = email_connector(settings)
             if conn is None:
@@ -518,7 +539,17 @@ def view(settings, store: Store, base_url: str) -> list[dict]:
 def summary(cards: list[dict]) -> dict:
     """Progress over what the agent needs: one mailbox (any of the email options), Claude, Todoist, WhatsApp."""
     ok = {c["name"] for c in cards if c["status"] == "connected"}
-    needs = [("Email", {"email", "gmail", "outlook"}), ("Claude", {"claude"}), ("Todoist", {"todoist"}),
+    needs = [("Email", {"email", "gmail", "outlook"}), ("AI", {"claude", "openai"}), ("Todoist", {"todoist"}),
              ("WhatsApp", {"whatsapp"})]
     missing = [label for label, names in needs if not (names & ok)]
     return {"total": len(needs), "connected": len(needs) - len(missing), "missing": missing}
+
+
+def ai_choice(settings, store: Store) -> dict:
+    """Which AI the PA uses, and which are connected."""
+    merged = with_integrations(settings, store)
+    have = {"claude": bool(merged.secret("ANTHROPIC_API_KEY")), "openai": bool(merged.secret("OPENAI_API_KEY"))}
+    current = (merged.secret("AI_PROVIDER") or "").lower()
+    if current not in have:
+        current = "openai" if have["openai"] and not have["claude"] else "claude"
+    return {"current": current, "have": have, "locked": from_env(settings, "AI_PROVIDER")}

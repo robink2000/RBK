@@ -13,7 +13,7 @@ import logging
 from datetime import datetime, timezone
 from html import escape
 
-from .brain import FALLBACK_BETA, ModelRefused, goals_text
+from .brain import goals_text
 from .connectors.gmail import sender_name
 from .connectors.todoist import localize
 from .db import row_dt
@@ -56,13 +56,8 @@ def _nullable(kind: str, **extra) -> dict:
 
 
 def _tool(name: str, description: str, properties: dict) -> dict:
-    return {
-        "name": name,
-        "description": description,
-        "strict": True,
-        "input_schema": {"type": "object", "properties": properties,
-                         "required": list(properties), "additionalProperties": False},
-    }
+    """Provider-neutral tool description; ai.py turns it into a strict Claude or OpenAI tool."""
+    return {"name": name, "description": description, "properties": properties}
 
 
 TOOLS = [
@@ -128,7 +123,11 @@ class Assistant:
         self.agent = agent
         self.store = agent.store
         self.settings = agent.settings
-        self.client = client or agent.brain.client
+        if client is not None:
+            from .ai import ClaudeLLM
+            self.llm = ClaudeLLM(self.settings.model, client=client)
+        else:
+            self.llm = agent.brain.llm
         self.user = user or self.store.user(self.settings.owner_id)
         self.is_owner = self.user is None or self.user["id"] == self.settings.owner_id
         self.tools = OWNER_TOOLS if self.is_owner else MEMBER_TOOLS
@@ -245,36 +244,11 @@ class Assistant:
                 f"New message:\n{text}")
 
     def reply(self, text: str) -> str:
-        messages = [{"role": "user", "content": self._context(text)}]
         who = ("the founder (admin)" if self.is_owner
                else f"{self.user['name']}, a team member (no access to the founder's email or personal Todoist)")
         team = ", ".join(f"{u['name']} ({u['role']})" for u in self.store.users()) or "just the founder"
         system = SYSTEM.format(goals=goals_text(self.settings.goals), who=who, team=team)
-        answer = None
-        for _ in range(MAX_STEPS):
-            response = self.client.beta.messages.create(
-                model=self.settings.model, max_tokens=16000, system=system, tools=self.tools,
-                messages=messages, output_config={"effort": "medium"},
-                betas=[FALLBACK_BETA], fallbacks="default",
-            )
-            if response.stop_reason == "refusal":
-                raise ModelRefused(str(response.stop_details))
-            calls = [b for b in response.content if b.type == "tool_use"]
-            if response.stop_reason != "tool_use" or not calls:
-                answer = "".join(b.text for b in response.content if b.type == "text").strip()
-                break
-            messages.append({"role": "assistant", "content": response.content})
-            results = []
-            for call in calls:
-                try:
-                    out = self.run_tool(call.name, dict(call.input))
-                    results.append({"type": "tool_result", "tool_use_id": call.id,
-                                    "content": json.dumps(out, default=str)})
-                except Exception as exc:
-                    log.warning("Chat tool %s failed: %s", call.name, exc)
-                    results.append({"type": "tool_result", "tool_use_id": call.id,
-                                    "content": f"Error: {exc}", "is_error": True})
-            messages.append({"role": "user", "content": results})
+        answer = self.llm.chat(system, self._context(text), self.tools, self.run_tool)
         answer = answer or "Sorry, that took too many steps. Could you ask in a simpler way?"
         mine = self._chat_role()
         self.store.add_chat(mine, text)

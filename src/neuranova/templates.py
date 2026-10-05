@@ -174,6 +174,8 @@ ul.w-steps { margin: 0 0 8px 18px; padding: 0; color: var(--ink-2); font-size: 1
 .server-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr)); gap: 8px; margin-top: 8px; }
 .server-grid input { width: 100%; }
 details.advanced { margin-top: 24px; }
+.ai-switch { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; padding: 10px 16px; margin-bottom: 12px; }
+.radio { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
 details.advanced > summary { cursor: pointer; }
 </style>
 </head>
@@ -599,7 +601,19 @@ INTEGRATIONS = """{% extends "base" %}{% from "nav" import top with context %}{%
 
 {% for group in ['Email', 'AI', 'Tasks', 'Messaging', 'Email (advanced)'] %}
 {% if group == 'Email (advanced)' %}<details class="advanced"><summary class="int-group">Advanced: connect email with Google or Microsoft sign-in instead</summary>{% else %}
-<div class="int-group">{{ group }}</div>{% endif %}
+<div class="int-group" {{ 'id=ai' if group == 'AI' else '' }}>{{ group }}</div>{% endif %}
+{% if group == 'AI' %}
+<form class="ai-switch card" method="post" action="/integrations/ai/provider">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <span>The PA uses</span>
+  {% for key, label in [('claude', 'Claude'), ('openai', 'OpenAI')] %}
+  <label class="radio"><input type="radio" name="provider" value="{{ key }}" {{ 'checked' if ai.current == key else '' }}
+    {{ 'disabled' if ai.locked else '' }} onchange="this.form.submit()"> {{ label }}{% if not ai.have[key] %} <small class="meta">(not connected)</small>{% endif %}</label>
+  {% endfor %}
+  {% if ai.locked %}<span class="meta">Set in the .env file</span>{% endif %}
+  <noscript><button type="submit">Save</button></noscript>
+</form>
+{% endif %}
 <div class="int-grid">
 {% for c in cards if c.category == group %}
   {% if c.wizard %}{{ email_card(c) }}{% else %}

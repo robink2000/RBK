@@ -164,6 +164,7 @@ EMAIL_COLUMNS_V2 = {
     "task_title": "TEXT NOT NULL DEFAULT ''",
     "task_due": "TEXT NOT NULL DEFAULT ''",
     "task_id": "TEXT",
+    "pa_analyzed_at": "TEXT",
 }
 
 
@@ -283,6 +284,20 @@ class Store:
         ).fetchone()
 
     # --- tasks from email ---------------------------------------------------
+
+    def emails_for_pa(self, limit: int = 10) -> list[sqlite3.Row]:
+        """Triaged emails worth a deeper PA look (skips newsletters, notifications and spam)."""
+        return self.conn.execute(
+            """SELECT * FROM emails WHERE owner_id = ? AND triaged_at IS NOT NULL AND pa_analyzed_at IS NULL
+               AND COALESCE(category, '') NOT IN ('newsletter', 'notification', 'spam')
+               AND COALESCE(priority, 'low') IN ('high', 'medium') ORDER BY received_at LIMIT ?""",
+            (self.owner_id, limit),
+        ).fetchall()
+
+    def mark_email_pa(self, email_id: int) -> None:
+        self.conn.execute("UPDATE emails SET pa_analyzed_at = ? WHERE id = ?",
+                          (_iso(datetime.now(timezone.utc)), email_id))
+        self.conn.commit()
 
     def tasks_to_create(self) -> list[sqlite3.Row]:
         return self.conn.execute(

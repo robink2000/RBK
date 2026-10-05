@@ -90,23 +90,13 @@ def test_check_inbox_triages_alerts_and_dedupes(settings, store):
     mail = FakeMail([email("Quote", "1", recent()), email("Digest", "2", recent(0))])
     agent = make_agent(settings, store, mail, FakeBrain({"Quote": LEAD, "Digest": NEWS}), FakeTodoist())
 
-    assert agent.check_inbox() == {"new": 2, "triaged": 2, "replied": 0, "tasks": 1, "drafts": 1}
+    assert agent.check_inbox() == {"new": 2, "triaged": 2, "replied": 0, "pa": 0, "drafts": 1}
     assert "Wants a quote" in agent.notifier.sent[0]           # instant high-priority alert
     assert "Draft #1" in agent.notifier.sent[1]                 # then the draft for approval
-    assert agent.check_inbox() == {"new": 0, "triaged": 0, "replied": 0, "tasks": 0, "drafts": 0}
+    assert agent.check_inbox() == {"new": 0, "triaged": 0, "replied": 0, "pa": 0, "drafts": 0}
     assert len(agent.notifier.sent) == 2                        # nothing repeated
     [waiting] = store.awaiting_reply()
     assert waiting["reply_deadline"] is not None
-
-
-def test_email_becomes_todoist_task_once(settings, store):
-    todo = FakeTodoist()
-    agent = make_agent(settings, store, FakeMail([email("Quote", "1", recent())]), FakeBrain({"Quote": LEAD}), todo)
-    agent.check_inbox()
-    agent.check_inbox()
-    [(content, description, due, priority)] = todo.added
-    assert content == "Prepare quote for Asha" and due == "friday" and priority == 4
-    assert "https://mail/1" in description
 
 
 def test_send_draft_flow(settings, store):
