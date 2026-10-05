@@ -235,13 +235,31 @@ def with_integrations(settings, store: Store):
     if vault is None:
         return settings
     extra: dict[str, str] = {}
+    off = disabled(store)
     for row in store.integrations():
+        if row["name"] in off:
+            continue  # switched off in the console: keep the keys, don't use them
         for key, value in vault.open(row["data_enc"]).items():
             if isinstance(value, str) and value and not settings.env.get(key):
                 extra[key] = value
     if "WHATSAPP_PHONE_NUMBER_ID" in extra and not settings.env.get("NOTIFY_CHANNEL"):
         extra["NOTIFY_CHANNEL"] = "whatsapp"
     return replace(settings, env={**settings.env, **extra}) if extra else settings
+
+
+DISABLED_KEY = "integrations_disabled"
+EXPIRED_HINTS = ("expired", "invalid_grant", "revoked", "token has been", "reauth", "sign in again", "401")
+
+
+def disabled(store: Store) -> set[str]:
+    return set(json.loads(store.get(DISABLED_KEY) or "[]"))
+
+
+def set_enabled(store: Store, name: str, enabled: bool, by_user: str) -> None:
+    off = disabled(store)
+    off.discard(name) if enabled else off.add(name)
+    store.put(DISABLED_KEY, json.dumps(sorted(off)))
+    store.log("integration_enabled" if enabled else "integration_disabled", integration=name, by=by_user)
 
 
 def from_env(settings, key: str) -> bool:
@@ -557,12 +575,17 @@ def _provider_help(settings) -> dict:
 def view(settings, store: Store, base_url: str) -> list[dict]:
     """Everything the Integrations page shows, per card."""
     merged = with_integrations(settings, store)
+    off = disabled(store)
     out = []
     for integ in CATALOG:
         row = store.integration(integ.name)
         saved = stored(store, settings, integ.name)
         configured = is_configured(integ.name, merged)
         status = row["status"] if row and configured else ("ready" if configured else "not_connected")
+        if integ.name in off:
+            status = "disabled"
+        elif status == "error" and any(h in (row["message"] or "").lower() for h in EXPIRED_HINTS):
+            status = "expired"
         fields = []
         for f in integ.fields:
             env_set = from_env(settings, f.key)

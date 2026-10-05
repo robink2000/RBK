@@ -562,7 +562,8 @@ TEAM = """{% extends "base" %}{% from "nav" import top, task_row with context %}
 
 INTEGRATIONS = """{% extends "base" %}{% from "nav" import top with context %}{% block body %}
 {% macro status_pill(c) %}{% set st = {'connected': ('good', '✓', 'Connected'), 'error': ('critical', '✕', 'Needs attention'),
-   'ready': ('ready', '…', 'Not tested'), 'not_connected': ('none', '–', 'Not connected')}[c.status] %}
+   'ready': ('ready', '…', 'Not tested'), 'not_connected': ('none', '–', 'Not connected'),
+   'disabled': ('none', '⏸', 'Disabled'), 'expired': ('warning', '!', 'Expired — reconnect')}[c.status] %}
 <span class="pill s-{{ st[0] }}"><span class="dot" aria-hidden="true">{{ st[1] }}</span>{{ st[2] }}</span>{% endmacro %}
 {% macro email_card(c) %}
 {% set f = {} %}{% for x in c.fields %}{% set _ = f.update({x.key: x}) %}{% endfor %}
@@ -615,7 +616,9 @@ INTEGRATIONS = """{% extends "base" %}{% from "nav" import top with context %}{%
         <div class="actions">
           <button class="primary" type="submit">{{ 'Save & test' if c.status == 'connected' else 'Connect' }}</button>
           {% if c.configured %}<button type="submit" formaction="/integrations/email/test">Test</button>
-          <button class="link" type="submit" formaction="/integrations/email/disconnect">Disconnect</button>{% endif %}
+          <button class="link" type="submit" formaction="/integrations/email/disconnect">Disconnect</button>
+          <button class="link" type="submit" formaction="/integrations/email/disable">Disable</button>{% endif %}
+          {% if c.status == 'disabled' %}<button type="submit" formaction="/integrations/email/enable">Enable</button>{% endif %}
         </div>
       </form>
       {% endif %}
@@ -692,6 +695,8 @@ INTEGRATIONS = """{% extends "base" %}{% from "nav" import top with context %}{%
         {% if c.configured %}<button type="submit" formaction="/integrations/{{ c.name }}/test">Test</button>{% endif %}
         {% if c.name == 'whatsapp' and c.configured %}<button type="submit" formaction="/integrations/whatsapp/send-test">Send me a test message</button>{% endif %}
         {% if c.configured or c.signed_in %}<button class="link" type="submit" formaction="/integrations/{{ c.name }}/disconnect">Disconnect</button>{% endif %}
+        {% if c.status == 'disabled' %}<button type="submit" formaction="/integrations/{{ c.name }}/enable">Enable</button>
+        {% elif c.configured or c.signed_in %}<button class="link" type="submit" formaction="/integrations/{{ c.name }}/disable">Disable</button>{% endif %}
       </div>
     </form>
 

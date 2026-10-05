@@ -625,6 +625,26 @@ def mount_dashboard(app: FastAPI, settings: Settings, agent_factory: Callable, s
         integ.disconnect(name, g[0].store, g[1]["id"])
         return back(f"/integrations#{name}", f"{integ.BY_NAME[name].title} disconnected. Values set in .env still apply.")
 
+    @app.post("/integrations/{name}/disable")
+    def disable_one(request: Request, name: str, csrf: str = Form("")) -> Response:
+        return toggle(request, name, csrf, False)
+
+    @app.post("/integrations/{name}/enable")
+    def enable_one(request: Request, name: str, csrf: str = Form("")) -> Response:
+        return toggle(request, name, csrf, True)
+
+    def toggle(request: Request, name: str, csrf: str, on: bool) -> Response:
+        g = founder(request, csrf)
+        if isinstance(g, Response):
+            return g
+        agent, me = g
+        if name not in integ.BY_NAME:
+            return back("/integrations", "Unknown integration.")
+        integ.set_enabled(agent.store, name, on, me["id"])
+        title = integ.BY_NAME[name].title
+        return back(f"/integrations#{name}", f"{title} enabled." if on else
+                    f"{title} disabled. Its keys are kept; press Enable to use it again.")
+
     @app.post("/integrations/whatsapp/send-test")
     def whatsapp_test(request: Request, csrf: str = Form("")) -> Response:
         g = founder(request, csrf)

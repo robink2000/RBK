@@ -113,3 +113,20 @@ def test_health_check_alerts_once_when_something_breaks(tmp_path, monkeypatch):
     integ.health_check(settings, store, sent.append)
     integ.health_check(settings, store, sent.append)
     assert len(sent) == 1 and "Todoist stopped working: token rejected" in sent[0]
+
+
+def test_disable_enable_and_expired_states(tmp_path, monkeypatch):
+    monkeypatch.setattr(integ, "test_integration", lambda name, s, store: (True, "Key works.", None))
+    settings, store, client = signed_in(tmp_path)
+    token = csrf_of(client.get("/integrations").text)
+    client.post("/integrations/claude/save", data={"csrf": token, "ANTHROPIC_API_KEY": "sk-ant-secret-9f2a"})
+    client.post("/integrations/claude/disable", data={"csrf": token})
+    assert integ.with_integrations(settings, store).secret("ANTHROPIC_API_KEY") == ""   # kept, but not used
+    cards = {c["name"]: c for c in integ.view(settings, store, "http://x")}
+    assert cards["claude"]["status"] == "disabled" and "Disabled" in client.get("/integrations").text
+    client.post("/integrations/claude/enable", data={"csrf": token})
+    assert integ.with_integrations(settings, store).secret("ANTHROPIC_API_KEY") == "sk-ant-secret-9f2a"
+    store.set_integration_status("claude", "error", "Token has been expired or revoked.")
+    cards = {c["name"]: c for c in integ.view(settings, store, "http://x")}
+    assert cards["claude"]["status"] == "expired" and "Expired" in client.get("/integrations").text
+    assert client.post("/integrations/claude/disable", data={"csrf": "forged"}).status_code == 403
