@@ -240,9 +240,7 @@ def mount_dashboard(app: FastAPI, settings: Settings, agent_factory: Callable, s
             drafts=[], waiting=[], tasks=[], tasks_error="", activity=[], setup=None,
         )
         if is_owner and sessions:
-            cards = integ.view(settings, store, public_url or str(request.base_url))
-            ctx["setup"] = {"total": len(cards), "connected": sum(1 for c in cards if c["status"] == "connected"),
-                            "missing": [c["title"] for c in cards if c["status"] != "connected"]}
+            ctx["setup"] = integ.summary(integ.view(settings, store, public_url or str(request.base_url)))
         if is_owner:
             for d in store.pending_drafts():
                 ctx["drafts"].append({"id": d["id"], "to": sender_name(d["sender"]), "subject": d["subject"],
@@ -522,7 +520,7 @@ def mount_dashboard(app: FastAPI, settings: Settings, agent_factory: Callable, s
         agent, me = g
         cards = integ.view(settings, agent.store, base_url(request))
         return page("integrations", me=me, csrf=sessions.csrf(request.cookies.get(COOKIE, "")), today=today_text(),
-                    msg=msg, cards=cards, connected=sum(1 for c in cards if c["status"] == "connected"))
+                    msg=msg, cards=cards, progress=integ.summary(cards))
 
     def form_values(name: str, form) -> dict:
         allowed = {f.key: f for f in integ.BY_NAME[name].fields}
@@ -547,6 +545,20 @@ def mount_dashboard(app: FastAPI, settings: Settings, agent_factory: Callable, s
         results = [integ.run_check(c.name, settings, agent.store)[0]
                    for c in integ.CATALOG if integ.is_configured(c.name, merged)]
         return back("/integrations", f"Tested {len(results)}: {sum(results)} working, {len(results) - sum(results)} need attention.")
+
+    @app.post("/integrations/email/detect")
+    def email_detect(request: Request, csrf: str = Form(""), address: str = Form("")) -> Response:
+        g = founder(request, csrf)
+        if isinstance(g, Response):
+            return g
+        agent, me = g
+        try:
+            found = integ.detect_email(agent.store, settings, address, me["id"])
+        except ValueError as exc:
+            return back("/integrations#email", str(exc))
+        if found["known"]:
+            return back("/integrations#email", f"Found {found['name']}. Now create an app password (step 2).")
+        return back("/integrations#email", "We couldn't recognise this mail host. Check the server settings in step 3.")
 
     @app.post("/integrations/{name}/save")
     async def save(request: Request, name: str) -> Response:

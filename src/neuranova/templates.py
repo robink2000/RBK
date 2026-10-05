@@ -98,6 +98,7 @@ ul.list li:first-child { border-top: 0; }
 .draft textarea { width: 100%; min-height: 120px; resize: vertical; font: inherit; color: var(--ink); background: var(--page);
                   border: 1px solid var(--border); border-radius: 8px; padding: 8px; }
 .needs { background: color-mix(in srgb, var(--warning) 18%, transparent); border-radius: 8px; padding: 6px 10px; margin: 8px 0; font-size: 13px; }
+a.btn { display: inline-block; text-decoration: none; }
 button, .btn { font: inherit; font-size: 14px; border-radius: 8px; padding: 6px 12px; cursor: pointer;
                border: 1px solid var(--border); background: var(--surface); color: var(--ink); }
 button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
@@ -156,6 +157,24 @@ ol.steps { margin: 6px 0 0 18px; padding: 0; display: grid; gap: 4px; font-size:
 .copyrow { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
 .copyrow input { flex: 1 1 auto; min-width: 0; font-family: ui-monospace, monospace; font-size: 12px; }
 .ext-links { display: flex; gap: 12px; flex-wrap: wrap; font-size: 14px; margin-top: 8px; }
+.email-card { grid-column: 1 / -1; }
+.chip.rec { background: color-mix(in srgb, var(--accent) 12%, var(--surface)); color: var(--accent); border-color: transparent; font-weight: 600; }
+ol.wizard { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; counter-reset: w; }
+ol.wizard > li { position: relative; padding: 4px 0 16px 40px; counter-increment: w; }
+ol.wizard > li::before { content: counter(w); position: absolute; left: 0; top: 0; width: 26px; height: 26px; border-radius: 50%;
+  display: grid; place-items: center; font: 600 13px var(--font-display); background: var(--grid); color: var(--ink-2); }
+ol.wizard > li:not(:last-child)::after { content: ""; position: absolute; left: 12px; top: 30px; bottom: 2px; width: 2px; background: var(--grid); }
+ol.wizard > li.now::before { background: var(--accent); color: var(--accent-ink); }
+ol.wizard > li.done::before { content: "✓"; background: var(--good); color: #fff; }
+ol.wizard > li.off { opacity: 0.55; }
+.w-title { font-weight: 600; margin-bottom: 6px; }
+.w-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.w-row input { flex: 1 1 240px; min-width: 0; }
+ul.w-steps { margin: 0 0 8px 18px; padding: 0; color: var(--ink-2); font-size: 14px; display: grid; gap: 2px; }
+.server-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr)); gap: 8px; margin-top: 8px; }
+.server-grid input { width: 100%; }
+details.advanced { margin-top: 24px; }
+details.advanced > summary { cursor: pointer; }
 </style>
 </head>
 <body><div class="brand-strip" aria-hidden="true"></div><main>{% block body %}{% endblock %}</main></body>
@@ -502,30 +521,93 @@ TEAM = """{% extends "base" %}{% from "nav" import top, task_row with context %}
 {% endblock %}"""
 
 INTEGRATIONS = """{% extends "base" %}{% from "nav" import top with context %}{% block body %}
+{% macro status_pill(c) %}{% set st = {'connected': ('good', '✓', 'Connected'), 'error': ('critical', '✕', 'Needs attention'),
+   'ready': ('ready', '…', 'Not tested'), 'not_connected': ('none', '–', 'Not connected')}[c.status] %}
+<span class="pill s-{{ st[0] }}"><span class="dot" aria-hidden="true">{{ st[1] }}</span>{{ st[2] }}</span>{% endmacro %}
+{% macro email_card(c) %}
+{% set f = {} %}{% for x in c.fields %}{% set _ = f.update({x.key: x}) %}{% endfor %}
+<section class="card int-card email-card" id="email">
+  <div class="int-head">
+    <div class="int-badge" aria-hidden="true">@</div>
+    <div style="min-width:0"><h2>Email</h2><p>{{ c.summary }}</p></div>
+    {{ status_pill(c) }}
+  </div>
+  <div class="chips">{% for u in c.unlocks %}<span class="chip">{{ u }}</span>{% endfor %}<span class="chip rec">Recommended</span></div>
+  {% if c.message %}<div class="int-status {{ 'error' if c.status == 'error' else '' }}">{% if c.account %}<strong>{{ c.account }}</strong> · {% endif %}{{ c.message }}{% if c.checked %}<span class="meta"> · checked {{ c.checked }}</span>{% endif %}</div>{% endif %}
+
+  <ol class="wizard">
+    <li class="{{ 'done' if f.EMAIL_ADDRESS.has_value else 'now' }}">
+      <div class="w-title">Your email address</div>
+      <form class="w-row" method="post" action="/integrations/email/detect">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input id="email-address" name="address" type="email" required autocomplete="email" aria-label="Email address"
+               value="{{ f.EMAIL_ADDRESS.shown }}" placeholder="you@neuranova.in" {{ 'disabled' if f.EMAIL_ADDRESS.env else '' }}>
+        <button class="{{ '' if f.EMAIL_ADDRESS.has_value else 'primary' }}" type="submit">{{ 'Change' if f.EMAIL_ADDRESS.has_value else 'Next' }}</button>
+      </form>
+      {% if c.provider %}<div class="meta">Detected: <strong>{{ c.provider.name }}</strong></div>{% endif %}
+    </li>
+    <li class="{{ 'off' if not f.EMAIL_ADDRESS.has_value else ('done' if f.EMAIL_APP_PASSWORD.has_value else 'now') }}">
+      <div class="w-title">Create an app password</div>
+      {% if c.provider %}
+        <ul class="w-steps">{% for step in c.provider.steps %}<li>{{ step }}</li>{% endfor %}</ul>
+        {% if c.provider.url %}<a class="btn" href="{{ c.provider.url }}" target="_blank" rel="noopener">Open {{ c.provider.name.split(' (')[0] }} app passwords ↗</a>{% endif %}
+        <div class="meta" style="margin-top:6px">An app password is a separate password just for NeuraNova. You can delete it any time, and your normal password stays private.</div>
+      {% else %}<div class="meta">Enter your address first.</div>{% endif %}
+    </li>
+    <li class="{{ 'off' if not f.EMAIL_ADDRESS.has_value else ('done' if c.status == 'connected' else 'now') }}">
+      <div class="w-title">Paste it and connect</div>
+      {% if f.EMAIL_ADDRESS.has_value %}
+      <form class="int-fields" method="post" action="/integrations/email/save" autocomplete="off">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="EMAIL_ADDRESS" value="{{ f.EMAIL_ADDRESS.shown }}">
+        <input type="hidden" name="EMAIL_PROVIDER" value="{{ f.EMAIL_PROVIDER.shown }}">
+        <label for="email-pw">App password
+          <input id="email-pw" name="EMAIL_APP_PASSWORD" type="password" autocomplete="new-password"
+                 placeholder="{{ ('Saved ' ~ f.EMAIL_APP_PASSWORD.shown ~ ' - leave blank to keep') if f.EMAIL_APP_PASSWORD.has_value else 'abcd efgh ijkl mnop' }}"></label>
+        <details {{ 'open' if c.provider and not c.provider.known else '' }}>
+          <summary>Server settings{% if c.provider and c.provider.known %} (filled in for you){% endif %}</summary>
+          <div class="server-grid">
+            {% for key in ['EMAIL_IMAP_HOST', 'EMAIL_IMAP_PORT', 'EMAIL_SMTP_HOST', 'EMAIL_SMTP_PORT'] %}{% set x = f[key] %}
+            <label for="email-{{ key }}">{{ x.label }}<input id="email-{{ key }}" name="{{ key }}" value="{{ x.shown }}" placeholder="{{ x.placeholder }}"></label>
+            {% endfor %}
+          </div>
+        </details>
+        <div class="actions">
+          <button class="primary" type="submit">{{ 'Save & test' if c.status == 'connected' else 'Connect' }}</button>
+          {% if c.configured %}<button type="submit" formaction="/integrations/email/test">Test</button>
+          <button class="link" type="submit" formaction="/integrations/email/disconnect">Disconnect</button>{% endif %}
+        </div>
+      </form>
+      {% endif %}
+    </li>
+  </ol>
+</section>
+{% endmacro %}
 {{ top('integrations', me, csrf, today) }}
 {% if msg %}<div class="flash" role="status">{{ msg }}</div>{% endif %}
 
 <section class="card">
   <h2>Integrations</h2>
   <div class="int-summary">
-    <strong>{{ connected }} of {{ cards|length }} connected</strong>
-    <div class="meter" role="img" aria-label="{{ connected }} of {{ cards|length }} connected"><span style="width: {{ (100 * connected / cards|length)|round|int }}%"></span></div>
+    <strong>{{ progress.connected }} of {{ progress.total }} connected</strong>
+    <div class="meter" role="img" aria-label="{{ progress.connected }} of {{ progress.total }} connected"><span style="width: {{ (100 * progress.connected / progress.total)|round|int }}%"></span></div>
+    {% if progress.missing %}<span class="meta">Still to do: {{ progress.missing|join(', ') }}</span>{% endif %}
     <form class="inline" method="post" action="/integrations/test-all"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit">Test all</button></form>
   </div>
   <p class="sub" style="margin-bottom:0">Keys and sign-ins are stored encrypted on your own server and are checked every morning. If one stops working, you get a WhatsApp alert.</p>
 </section>
 
-{% for group in ['AI', 'Email', 'Tasks', 'Messaging'] %}
-<div class="int-group">{{ group }}</div>
+{% for group in ['Email', 'AI', 'Tasks', 'Messaging', 'Email (advanced)'] %}
+{% if group == 'Email (advanced)' %}<details class="advanced"><summary class="int-group">Advanced: connect email with Google or Microsoft sign-in instead</summary>{% else %}
+<div class="int-group">{{ group }}</div>{% endif %}
 <div class="int-grid">
 {% for c in cards if c.category == group %}
+  {% if c.wizard %}{{ email_card(c) }}{% else %}
   <section class="card int-card" id="{{ c.name }}">
     <div class="int-head">
       <div class="int-badge" aria-hidden="true">{{ c.title[0] }}</div>
       <div style="min-width:0"><h2>{{ c.title }}</h2><p>{{ c.summary }}</p></div>
-      {% set st = {'connected': ('good', '✓', 'Connected'), 'error': ('critical', '✕', 'Needs attention'),
-                   'ready': ('ready', '…', 'Not tested'), 'not_connected': ('none', '–', 'Not connected')}[c.status] %}
-      <span class="pill s-{{ st[0] }}"><span class="dot" aria-hidden="true">{{ st[1] }}</span>{{ st[2] }}</span>
+      {{ status_pill(c) }}
     </div>
     <div class="chips" aria-label="Unlocks">{% for u in c.unlocks %}<span class="chip">{{ u }}</span>{% endfor %}</div>
 
@@ -577,8 +659,10 @@ INTEGRATIONS = """{% extends "base" %}{% from "nav" import top with context %}{%
       <div class="ext-links">{% for label, url in c.links %}<a href="{{ url }}" target="_blank" rel="noopener">{{ label }} ↗</a>{% endfor %}</div>
     </details>
   </section>
+  {% endif %}
 {% endfor %}
 </div>
+{% if group == 'Email (advanced)' %}</details>{% endif %}
 {% endfor %}
 <script>
 document.addEventListener('click', function (e) {

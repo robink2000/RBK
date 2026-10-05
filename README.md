@@ -38,9 +38,9 @@ Sign in to the console and open **Integrations**. Each service has a card:
 
 | Service | How you connect |
 |---|---|
+| **Email** (recommended) | Type your address. The console detects your provider (Google, Outlook.com, Zoho, Hostinger, GoDaddy, Yahoo, iCloud…) and fills in the server settings. Open the app-password page with the button, create one, paste it, and press **Connect**. |
 | Claude | Paste an API key |
-| Gmail | Paste your Google app's client ID and secret, then press **Connect with Google** |
-| Outlook / Microsoft 365 | Paste your Microsoft app ID, then press **Connect with Microsoft** |
+| Gmail or Microsoft 365 with sign-in (advanced) | Only if your company turned off app passwords. Paste your own Google or Microsoft app's details, then press **Connect with Google** or **Connect with Microsoft** |
 | Todoist | Paste your API token |
 | WhatsApp | Fill in the Meta details, then **Send me a test message** |
 

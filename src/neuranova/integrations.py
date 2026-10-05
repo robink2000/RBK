@@ -12,6 +12,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import secrets
 import time
 from dataclasses import dataclass, field, replace
@@ -55,6 +56,20 @@ class Integration:
 
 CATALOG: tuple[Integration, ...] = (
     Integration(
+        "email", "Email", "Email",
+        "Your business inbox. Type your address, paste an app password, done. Works with Google, "
+        "Outlook.com, Zoho, Hostinger, GoDaddy and most other mail hosts.",
+        ("Inbox triage", "4-hour reply tracking", "Reply drafts"),
+        fields=(Field("EMAIL_ADDRESS", "Email address", placeholder="you@neuranova.in"),
+                Field("EMAIL_APP_PASSWORD", "App password", secret=True),
+                Field("EMAIL_IMAP_HOST", "Incoming server (IMAP)"),
+                Field("EMAIL_IMAP_PORT", "Port", placeholder="993"),
+                Field("EMAIL_SMTP_HOST", "Outgoing server (SMTP)"),
+                Field("EMAIL_SMTP_PORT", "Port", placeholder="465"),
+                Field("EMAIL_PROVIDER", "Provider", required=False)),
+        extra={"wizard": True},
+    ),
+    Integration(
         "claude", "Claude", "AI",
         "The brain of the agent: sorts email, drafts replies, writes briefs and answers chat.",
         ("Email triage", "Reply drafts", "Morning brief", "Chat"),
@@ -64,8 +79,8 @@ CATALOG: tuple[Integration, ...] = (
         links=(("Claude Console", "https://console.anthropic.com/settings/keys"),),
     ),
     Integration(
-        "gmail", "Gmail", "Email",
-        "Reads your inbox and sends the replies you approve, from your own address.",
+        "gmail", "Gmail with Google sign-in", "Email (advanced)",
+        "Only if your company turned off app passwords. Needs a one-time app on Google Cloud.",
         ("Inbox triage", "4-hour reply tracking", "Reply drafts"),
         fields=(Field("GOOGLE_CLIENT_ID", "Google client ID", placeholder="1234-abc.apps.googleusercontent.com"),
                 Field("GOOGLE_CLIENT_SECRET", "Google client secret", secret=True)),
@@ -78,8 +93,8 @@ CATALOG: tuple[Integration, ...] = (
                ("Enable Gmail API", "https://console.cloud.google.com/apis/library/gmail.googleapis.com")),
     ),
     Integration(
-        "outlook", "Outlook / Microsoft 365", "Email",
-        "Reads your Outlook inbox and sends the replies you approve.",
+        "outlook", "Microsoft 365 with Microsoft sign-in", "Email (advanced)",
+        "For work Microsoft 365 mailboxes, which usually block app passwords.",
         ("Inbox triage", "4-hour reply tracking", "Reply drafts"),
         fields=(Field("OUTLOOK_CLIENT_ID", "Application (client) ID", placeholder="00000000-0000-..."),
                 Field("OUTLOOK_CLIENT_SECRET", "Client secret", secret=True, required=False,
@@ -219,6 +234,11 @@ def test_integration(name: str, settings, store: Store) -> tuple[bool, str, str 
                 return False, "Add an API key.", None
             model = anthropic.Anthropic(api_key=s("ANTHROPIC_API_KEY")).models.retrieve(settings.model)
             return True, f"Key works. Using {model.display_name}.", None
+        if name == "email":
+            conn = email_connector(settings)
+            if conn is None:
+                return False, "Add your email address and app password.", None
+            return True, conn.check(), s("EMAIL_ADDRESS")
         if name == "todoist":
             if not s("TODOIST_API_TOKEN"):
                 return False, "Add your API token.", None
@@ -276,6 +296,34 @@ def _plain_error(exc: Exception) -> str:
     if "timed out" in lowered or "connecterror" in lowered or "name or service" in lowered:
         return "Couldn't reach the service. Check the internet connection and try again."
     return text[:240]
+
+
+def email_connector(settings):
+    """The quick-connect mailbox from settings, or None if it isn't filled in."""
+    s = settings.secret
+    if not (s("EMAIL_ADDRESS") and s("EMAIL_APP_PASSWORD") and s("EMAIL_IMAP_HOST")):
+        return None
+    from .connectors.imap import ImapConnector
+
+    return ImapConnector(s("EMAIL_ADDRESS"), s("EMAIL_APP_PASSWORD").replace(" ", ""), s("EMAIL_IMAP_HOST"),
+                         int(s("EMAIL_IMAP_PORT") or 993), s("EMAIL_SMTP_HOST") or s("EMAIL_IMAP_HOST"),
+                         int(s("EMAIL_SMTP_PORT") or 465), s("EMAIL_PROVIDER") or "other")
+
+
+def detect_email(store: Store, settings, address: str, by_user: str, http=None) -> dict:
+    """Step 1 of the email wizard: remember the address and fill in its server settings."""
+    from .connectors.imap import detect
+
+    address = address.strip()
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", address):
+        raise ValueError("Enter a full email address, like you@neuranova.in.")
+    found = detect(address, http)
+    save_values(store, settings, "email", {
+        "EMAIL_ADDRESS": address, "EMAIL_PROVIDER": found["provider"],
+        "EMAIL_IMAP_HOST": found["imap_host"], "EMAIL_IMAP_PORT": str(found["imap_port"]),
+        "EMAIL_SMTP_HOST": found["smtp_host"], "EMAIL_SMTP_PORT": str(found["smtp_port"]),
+    }, by_user)
+    return found
 
 
 def run_check(name: str, settings, store: Store) -> tuple[bool, str]:
@@ -418,6 +466,21 @@ def new_verify_token() -> str:
     return secrets.token_urlsafe(24)
 
 
+def _provider_help(settings) -> dict:
+    from .connectors.imap import PROVIDERS
+
+    key = settings.secret("EMAIL_PROVIDER")
+    address = settings.secret("EMAIL_ADDRESS")
+    if not address:
+        return {}
+    p = PROVIDERS.get(key)
+    if p is None:
+        return {"name": f"Your mail host ({address.rsplit('@', 1)[-1]})", "url": "", "known": False,
+                "steps": ("Use the password for this mailbox, or an app password if your host offers one.",
+                          "Check the server names below with your host's help page (often under 'IMAP settings').")}
+    return {"name": p.name, "url": p.app_password_url, "known": True, "steps": p.steps}
+
+
 def view(settings, store: Store, base_url: str) -> list[dict]:
     """Everything the Integrations page shows, per card."""
     merged = with_integrations(settings, store)
@@ -446,5 +509,16 @@ def view(settings, store: Store, base_url: str) -> list[dict]:
             "signed_in": bool(integ.token_key and merged.secret(integ.token_key)),
             "webhook_url": f"{base_url.rstrip('/')}/webhook" if integ.name == "whatsapp" else "",
             "verify_token": merged.secret("WHATSAPP_VERIFY_TOKEN") if integ.name == "whatsapp" else "",
+            "wizard": bool(integ.extra.get("wizard")),
+            "provider": _provider_help(merged) if integ.name == "email" else {},
         })
     return out
+
+
+def summary(cards: list[dict]) -> dict:
+    """Progress over what the agent needs: one mailbox (any of the email options), Claude, Todoist, WhatsApp."""
+    ok = {c["name"] for c in cards if c["status"] == "connected"}
+    needs = [("Email", {"email", "gmail", "outlook"}), ("Claude", {"claude"}), ("Todoist", {"todoist"}),
+             ("WhatsApp", {"whatsapp"})]
+    missing = [label for label, names in needs if not (names & ok)]
+    return {"total": len(needs), "connected": len(needs) - len(missing), "missing": missing}

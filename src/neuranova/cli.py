@@ -40,6 +40,10 @@ def build_agent(settings: Settings):
                 on_refresh=lambda t: save_values(store, base_settings, "gmail", {"GMAIL_TOKEN_JSON": t}, "agent")))
         except Exception as exc:
             log.warning("Gmail disabled: %s", exc)
+    from .integrations import email_connector
+    quick = email_connector(settings)
+    if quick is not None:
+        mail.append(quick)
     client_id = settings.secret("OUTLOOK_CLIENT_ID")
     if client_id:
         try:
