@@ -188,7 +188,8 @@ def build(store, settings, now: datetime | None = None, meetings: list[dict] | N
         (len(meetings or []), "meeting today", "meetings"),
     ]
     plural = {"person has not delivered as promised": "people have not delivered as promised",
-              "due today": "due today", "waiting for your reply": "waiting for your reply"}
+              "due today": "due today", "waiting for your reply": "waiting for your reply",
+              "lead needs attention": "leads need attention"}
     lines = [{"count": n, "text": (plural.get(t, t + "s") if n != 1 else t), "anchor": a}
              for n, t, a in headline if n]
 

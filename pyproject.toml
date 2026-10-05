@@ -19,6 +19,8 @@ dependencies = [
     "tzdata>=2024.1",  # timezone database; Windows has none built in
     "openai>=1.40",
     "playwright>=1.45",
+    "icalendar>=5.0",
+    "recurring-ical-events>=2.1",
 ]
 
 [project.optional-dependencies]

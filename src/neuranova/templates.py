@@ -297,7 +297,7 @@ CHART = """{% macro chart(c, title, table_label, note="") %}
 </table></details>
 {% endmacro %}"""
 
-DASHBOARD = """{% extends "base" %}{% from "chart" import chart %}{% from "nav" import top, task_row with context %}{% block body %}
+DASHBOARD = """{% extends "base" %}{% from "chart" import chart %}{% from "nav" import top, task_row with context %}{% from "pa" import briefing with context %}{% block body %}
 {% macro mytasks() %}
 <section class="card" id="mytasks">
   <h2>My team tasks ({{ my_tasks|length }})</h2>
@@ -309,8 +309,15 @@ DASHBOARD = """{% extends "base" %}{% from "chart" import chart %}{% from "nav" 
 {% endmacro %}
 {{ top('home', me, csrf, today) }}
 {% if msg %}<div class="flash" role="status">{{ msg }}</div>{% endif %}
+{% if is_owner and not setup_done %}
+<section class="card setup-nudge">
+  <div><h2 style="margin:0">Welcome to NeuraNova PA</h2><div class="sub">A 10-step setup connects email, WhatsApp, calendar, AI and your applications. Every step can be skipped.</div></div>
+  <a class="btn" href="/setup">Start setup</a>
+</section>
+{% endif %}
+{% if b %}{{ briefing(b, True) }}{% endif %}
 {% if not is_owner %}{{ mytasks() }}{% endif %}
-{% if is_owner and setup and setup.connected < setup.total %}
+{% if is_owner and setup and setup.connected < setup.total and setup_done %}
 <section class="card setup-nudge">
   <div><h2 style="margin:0">Finish connecting your accounts</h2>
     <div class="sub">{{ setup.connected }} of {{ setup.total }} connected{% if setup.missing %}. Still to do: {{ setup.missing|join(', ') }}{% endif %}.</div></div>
@@ -429,12 +436,6 @@ DASHBOARD = """{% extends "base" %}{% from "chart" import chart %}{% from "nav" 
   </table></div>
 </section>
 
-{% if is_owner %}
-<section class="card">
-  <h2>Agent activity</h2>
-  <div class="scroll"><table>{% for a in activity %}<tr><td class="meta" style="white-space:nowrap">{{ a.at }}</td><td>{{ a.action }}</td><td class="meta">{{ a.detail }}</td></tr>{% endfor %}</table></div>
-</section>
-{% endif %}
 {% endblock %}"""
 
 def manifest(brand) -> dict:
@@ -737,3 +738,7 @@ env = Environment(
 )
 env.globals["brand"] = {"name": "NeuraNova", "tagline": "Operations console", "accent": "#6b1fa3",
                         "accent_dark": "#a06ad9"}
+
+from .pa_templates import register as _register_pa  # noqa: E402
+
+_register_pa(env)
