@@ -180,6 +180,15 @@ class Agent:
             done += 1
         return done
 
+    def proactive(self) -> dict:
+        """Tell the founder what needs attention (digest, no repeats, no spam)."""
+        from .pa import proactive
+        return proactive.run(self.store, self.settings, self.notifier.send)
+
+    def briefing(self, meetings: list | None = None, user_name: str = "") -> dict:
+        from .pa import briefing
+        return briefing.build(self.store, self.settings, meetings=meetings, user_name=user_name)
+
     # --- email -> Todoist ----------------------------------------------------
 
     def create_tasks(self) -> int:

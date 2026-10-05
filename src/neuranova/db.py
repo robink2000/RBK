@@ -672,6 +672,10 @@ class Store:
         self.conn.commit()
         return cur.rowcount == 0  # True if it had already been sent
 
+    def reminder_sent_check(self, key: str) -> bool:
+        return self.conn.execute("SELECT 1 FROM reminders_sent WHERE owner_id = ? AND task_id = ?",
+                                 (self.owner_id, key)).fetchone() is not None
+
     def log(self, action: str, **detail) -> None:
         self.conn.execute(
             "INSERT INTO activity_log (workspace_id, owner_id, at, action, detail) VALUES (?, ?, ?, ?, ?)",

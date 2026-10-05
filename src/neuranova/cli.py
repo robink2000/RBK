@@ -107,6 +107,8 @@ def run_forever(settings: Settings) -> None:
                   max_instances=1, coalesce=True)
     sched.add_job(job("task_reminders"), "interval", minutes=settings.task_reminder_minutes, id="tasks",
                   max_instances=1, coalesce=True)
+    sched.add_job(job("proactive"), "interval", minutes=settings.sla_check_minutes, id="proactive",
+                  max_instances=1, coalesce=True)
     sched.add_job(job("team_reminders"), "interval", minutes=settings.task_reminder_minutes, id="team",
                   max_instances=1, coalesce=True)
     def integrations_health():
