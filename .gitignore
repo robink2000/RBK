@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+# Secrets and local state - never commit these
+.env
+data/
+secrets/

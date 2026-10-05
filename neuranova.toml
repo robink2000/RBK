@@ -1,0 +1,63 @@
+# Non-secret settings for the NeuraNova agent.
+
+[brand]
+name = "NeuraNova"
+tagline = "Operations console"
+accent = "#4a3aa7"        # buttons, links and charts (light theme)
+accent_dark = "#9085e9"   # the same accent for dark theme
+# Your own logo instead of the built-in mark: put the file in the project and give its path.
+# logo = "brand/logo.svg"   # .svg, .png, .jpg or .webp
+
+[workspace]
+id = "neuranova"
+owner_id = "owner"      # becomes a real user id when the team joins
+timezone = "UTC"        # change to your timezone, e.g. "Asia/Kolkata"
+
+[working_hours]
+start = "09:00"
+end = "18:00"
+days = ["mon", "tue", "wed", "thu", "fri"]
+
+[response_sla]
+hours = 4               # business hours to reply to clients / leads
+warn_before_minutes = 60
+# Categories that are held to the SLA (high-priority mail is always included)
+categories = ["client", "lead", "partner"]
+
+[schedule]
+morning_brief = "08:30"
+weekly_report_day = "mon"
+weekly_report_time = "09:00"
+inbox_check_minutes = 15
+sla_check_minutes = 15
+task_reminder_minutes = 10
+task_reminder_lead_minutes = 30
+
+[alerts]
+instant_high_priority = true   # WhatsApp ping for every new high-priority email
+
+[tasks]
+auto_create_from_email = true  # emails with real work (invoice, proposal...) become Todoist tasks
+
+[replies]
+draft_replies = true           # draft replies to clients/leads/partners for your approval
+# Your sign-off, exactly as it should appear at the end of every reply
+signature = """
+Best regards,
+[Your name]
+NeuraNova"""
+tone = "Warm, professional and concise. Plain English. No buzzwords."
+draft_lookback_days = 3        # don't draft for mail older than this
+max_drafts_per_run = 5
+
+[[goals]]
+name = "Develop the business"
+measure = "New leads, client follow-ups done on time, deals moving forward"
+
+[[goals]]
+name = "Give proper responses"
+measure = "Every client/lead message answered within the response SLA"
+
+[[goals]]
+name = "Deliver high quality"
+measure = "Deadlines met, no rework, positive client feedback"
