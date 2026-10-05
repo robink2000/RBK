@@ -138,6 +138,13 @@ def run_forever(settings: Settings) -> None:
                   id="integrations", max_instances=1, coalesce=True)
     sched.add_job(job("morning_brief"), "cron", hour=settings.morning_brief.hour,
                   minute=settings.morning_brief.minute, id="brief", max_instances=1, coalesce=True)
+    sched.add_job(job("eod_summary"), "cron", day_of_week=",".join(
+        ["mon", "tue", "wed", "thu", "fri", "sat", "sun"][d] for d in sorted(settings.working_hours.days)),
+        hour=settings.working_hours.end.hour, minute=settings.working_hours.end.minute, id="eod",
+        max_instances=1, coalesce=True)
+    sched.add_job(job("monthly_report"), "cron", day=1, hour=settings.weekly_report_time.hour,
+                  minute=settings.weekly_report_time.minute + 10 if settings.weekly_report_time.minute < 50 else 0,
+                  id="monthly", max_instances=1, coalesce=True)
     sched.add_job(job("weekly_report"), "cron", day_of_week=settings.weekly_report_day,
                   hour=settings.weekly_report_time.hour, minute=settings.weekly_report_time.minute,
                   id="weekly", max_instances=1, coalesce=True)
@@ -171,6 +178,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("reminders", help="send due task reminders now")
     sub.add_parser("brief", help="build and send the morning brief now")
     sub.add_parser("weekly", help="build and send the weekly progress report now")
+    rep = sub.add_parser("report", help="write a report now and print it")
+    rep.add_argument("kind", choices=["morning", "eod", "weekly", "monthly", "sales", "quality", "qa"])
     qa_cmd = sub.add_parser("qa", help="run the application checks now")
     qa_cmd.add_argument("environment", choices=["production", "development"])
     sub.add_parser("progress", help="print goal progress numbers (no Claude call, nothing sent)")
@@ -241,6 +250,8 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"sent": agent.task_reminders()}))
     elif args.command == "brief":
         agent.morning_brief()
+    elif args.command == "report":
+        print(agent.report(args.kind)["text"])
     elif args.command == "qa":
         print(json.dumps(agent.run_qa(args.environment), indent=2))
     elif args.command == "weekly":

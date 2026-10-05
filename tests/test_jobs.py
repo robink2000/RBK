@@ -175,14 +175,12 @@ def test_task_reminder_sent_once(settings, store):
     assert "Call investor" in agent.notifier.sent[0] and "P1" in agent.notifier.sent[0]
 
 
-def test_morning_brief_facts(settings, store):
+def test_morning_brief_is_a_saved_report(settings, store):
     mail = FakeMail([email("Quote", "1", recent(60)), email("Digest", "2", recent(0))])
     brain = FakeBrain({"Quote": LEAD, "Digest": NEWS})
     agent = make_agent(settings, store, mail, brain, todoist=FakeTodoist())
-    assert agent.morning_brief() == "brief"
-    facts = brain.facts
-    assert facts["leads_new"] == 1
-    assert facts["waiting_for_your_reply"][0]["from"] == "Asha"
-    assert [e["subject"] for e in facts["important_new_email"]] == ["Quote"]
-    assert facts["reply_drafts_waiting_for_your_approval"] == 1
-    assert agent.notifier.sent[-1] == "brief"
+    text = agent.morning_brief()
+    assert "Morning Brief" in text and "waiting for your reply" in text      # plain version without AI
+    assert agent.notifier.sent[-1] == text
+    [report] = store.pa.reports("morning")
+    assert report["text"] == text

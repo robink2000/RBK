@@ -631,7 +631,7 @@ def mount_dashboard(app: FastAPI, settings: Settings, agent_factory: Callable, s
         if isinstance(g, Response):
             return g
         agent, me = g
-        name = {"google": "gmail", "microsoft": "outlook"}.get(provider)
+        name = {"google": "gmail", "microsoft": "outlook", "google_drive": "drive"}.get(provider)
         if name is None:
             return back("/integrations", "Unknown sign-in provider.")
         values = {k: v for k, v in form_values(name, form).items() if v}
@@ -648,7 +648,7 @@ def mount_dashboard(app: FastAPI, settings: Settings, agent_factory: Callable, s
         # Coming back from Google/Microsoft is a cross-site navigation, so the SameSite=Strict session
         # cookie is not sent here. The single-use, 15-minute state (bound to the founder who started it)
         # authorises this step; the page then moves on with a fresh same-site navigation.
-        if provider not in ("google", "microsoft"):
+        if provider not in ("google", "microsoft", "google_drive"):
             return Response(status_code=404)
         agent = agent_factory()
         try:
@@ -656,5 +656,5 @@ def mount_dashboard(app: FastAPI, settings: Settings, agent_factory: Callable, s
         except Exception as exc:
             log.warning("OAuth %s failed: %s", provider, exc)
             msg = f"✕ {exc}"
-        name = "gmail" if provider == "google" else "outlook"
+        name = {"google": "gmail", "microsoft": "outlook", "google_drive": "drive"}[provider]
         return page("return", url=f"/integrations?msg={quote(msg)}#{name}")

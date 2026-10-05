@@ -220,6 +220,8 @@ class Agent:
 
     def briefing(self, meetings: list | None = None, user_name: str = "") -> dict:
         from .pa import briefing
+        if meetings is None:
+            meetings = self.meetings()["today"]
         return briefing.build(self.store, self.settings, meetings=meetings, user_name=user_name)
 
     # --- email -> Todoist ----------------------------------------------------
@@ -550,27 +552,66 @@ class Agent:
             ][:15],
         }
 
+    # --- calendar and reports ------------------------------------------------------------
+
+    def meetings(self, force: bool = False) -> dict:
+        from .integrations import calendar_urls
+        from .pa.calendar import cached_events, meetings_view
+
+        try:
+            events = cached_events(self.store, self.settings, calendar_urls(self.settings, self.store), force=force)
+        except Exception:
+            log.exception("Calendar unavailable")
+            events = []
+        return meetings_view(self.pa, events, self.settings.tz)
+
+    def report(self, kind: str, deliver: bool = False) -> dict:
+        """Write a report (AI text when available, plain text otherwise), save it, optionally send it."""
+        from .brain import goals_text
+        from .pa import reports
+
+        out = reports.generate(kind, self.store, self.settings, llm=getattr(self.brain, "llm", None),
+                               goals=goals_text(self.settings.goals), meetings=self.meetings())
+        if deliver:
+            self.notifier.send(out["text"], teaser=f"Your {reports.TITLES[kind]} is ready. Open NeuraNova PA → Reports.")
+        self._save_to_drive(out)
+        return out
+
+    def _save_to_drive(self, out: dict) -> None:
+        from .integrations import save_values, with_integrations
+
+        merged = with_integrations(self.settings, self.store)
+        token = merged.secret("GDRIVE_TOKEN_JSON")
+        if not token:
+            return
+        try:
+            from .pa.drive import upload_report
+            link, folder = upload_report(token, out["title"], out["text"], self.store.get("drive_folder_id") or "",
+                                         on_refresh=lambda t: save_values(self.store, self.settings, "drive",
+                                                                          {"GDRIVE_TOKEN_JSON": t}, "agent"))
+            self.store.put("drive_folder_id", folder)
+            self.store.log("report_saved_to_drive", title=out["title"], link=link)
+        except Exception:
+            log.exception("Could not save the report to Google Drive")
+
     def weekly_report(self) -> str:
-        facts = {
-            "this_week": compute_progress(self.store, self.settings.tz, days=7),
-            "last_30_days": compute_progress(self.store, self.settings.tz, days=30),
-            "by_week": weekly_series(self.store, self.settings.tz, weeks=8),
-            "recent_events": [dict(e) for e in self.store.recent_events(20)],
-            "team_last_7_days": team_stats(self.store, days=7),
-            "team_blocked_now": [format_task(t, self.settings.tz) + f" ({t['blocked_reason']})"
-                                 for t in self.store.team_tasks("open") if t["status"] == "blocked"],
-        }
-        text = self.brain.write_weekly(facts)
-        self.notifier.send(text, teaser="Your weekly NeuraNova progress report is ready. Reply 'report' to read it.")
-        self.store.put("last_weekly_report", text)
-        self.store.log("weekly_report", chars=len(text))
-        return text
+        out = self.report("weekly", deliver=True)
+        for kind in ("sales", "quality", "qa"):  # saved for the Reports page, not sent (no spam)
+            try:
+                self.report(kind)
+            except Exception:
+                log.exception("Could not write the %s report", kind)
+        self.store.put("last_weekly_report", out["text"])
+        return out["text"]
 
     def morning_brief(self) -> str:
         self.check_inbox()
-        facts = self.gather_brief_facts()
-        text = self.brain.write_brief(facts)
-        self.notifier.send(text)
+        out = self.report("morning", deliver=True)
         self.store.put("last_brief", self._now().isoformat())
-        self.store.log("morning_brief", chars=len(text))
-        return text
+        return out["text"]
+
+    def eod_summary(self) -> str:
+        return self.report("eod", deliver=True)["text"]
+
+    def monthly_report(self) -> str:
+        return self.report("monthly", deliver=True)["text"]

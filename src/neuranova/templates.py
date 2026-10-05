@@ -599,7 +599,7 @@ INTEGRATIONS = """{% extends "base" %}{% from "nav" import top with context %}{%
   <p class="sub" style="margin-bottom:0">Keys and sign-ins are stored encrypted on your own server and are checked every morning. If one stops working, you get a WhatsApp alert.</p>
 </section>
 
-{% for group in ['Email', 'AI', 'Tasks', 'Messaging', 'Email (advanced)'] %}
+{% for group in ['Email', 'AI', 'Messaging', 'Calendar & documents', 'Tasks', 'Email (advanced)'] %}
 {% if group == 'Email (advanced)' %}<details class="advanced"><summary class="int-group">Advanced: connect email with Google or Microsoft sign-in instead</summary>{% else %}
 <div class="int-group" {{ 'id=ai' if group == 'AI' else '' }}>{{ group }}</div>{% endif %}
 {% if group == 'AI' %}
@@ -649,7 +649,7 @@ INTEGRATIONS = """{% extends "base" %}{% from "nav" import top with context %}{%
       <div class="actions">
         {% if c.fields %}<button class="{{ '' if c.oauth else 'primary' }}" type="submit">Save &amp; test</button>{% endif %}
         {% if c.oauth %}
-        <button class="primary" type="submit" formaction="/integrations/{{ c.oauth }}/connect">{{ 'Reconnect' if c.signed_in else 'Connect' }} with {{ 'Google' if c.oauth == 'google' else 'Microsoft' }}</button>
+        <button class="primary" type="submit" formaction="/integrations/{{ c.oauth }}/connect">{{ 'Reconnect' if c.signed_in else 'Connect' }} with {{ 'Microsoft' if c.oauth == 'microsoft' else 'Google' }}</button>
         {% endif %}
         {% if c.configured %}<button type="submit" formaction="/integrations/{{ c.name }}/test">Test</button>{% endif %}
         {% if c.name == 'whatsapp' and c.configured %}<button type="submit" formaction="/integrations/whatsapp/send-test">Send me a test message</button>{% endif %}
@@ -662,7 +662,7 @@ INTEGRATIONS = """{% extends "base" %}{% from "nav" import top with context %}{%
       <ol class="steps">{% for step in c.steps %}<li>{{ step }}</li>{% endfor %}</ol>
       {% if c.redirect_uri %}
       <div class="copyrow"><input readonly value="{{ c.redirect_uri }}" aria-label="Redirect URI" onclick="this.select()"><button type="button" data-copy="{{ c.redirect_uri }}">Copy</button></div>
-      <small class="meta">Redirect URI: paste this into the {{ 'Google' if c.oauth == 'google' else 'Microsoft' }} app settings.</small>
+      <small class="meta">Redirect URI: paste this into the {{ 'Microsoft' if c.oauth == 'microsoft' else 'Google' }} app settings.</small>
       {% endif %}
       {% if c.webhook_url %}
       <div class="copyrow"><input readonly value="{{ c.webhook_url }}" aria-label="Webhook URL" onclick="this.select()"><button type="button" data-copy="{{ c.webhook_url }}">Copy</button></div>

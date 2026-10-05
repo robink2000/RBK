@@ -90,7 +90,7 @@ def test_google_connect_round_trip(tmp_path, monkeypatch):
 
     fake = SimpleNamespace(credentials=SimpleNamespace(to_json=lambda: '{"token": "t", "refresh_token": "r"}'),
                            fetch_token=lambda code: None)
-    monkeypatch.setattr(integ, "_google_flow", lambda s, uri, code_verifier=None: fake)
+    monkeypatch.setattr(integ, "_google_flow", lambda s, uri, code_verifier=None, scopes=None: fake)
     monkeypatch.setattr(integ, "test_integration", lambda name, s, store: (True, "ok", "robin@gmail.com"))
     bad = TestClient(client.app).get("/integrations/google/callback", params={"state": "forged", "code": "x"})
     assert "expired" in bad.text
