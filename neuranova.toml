@@ -1,0 +1,39 @@
+# Non-secret settings for the NeuraNova agent.
+
+[workspace]
+id = "neuranova"
+owner_id = "owner"      # becomes a real user id when the team joins
+timezone = "UTC"        # change to your timezone, e.g. "Asia/Kolkata"
+
+[working_hours]
+start = "09:00"
+end = "18:00"
+days = ["mon", "tue", "wed", "thu", "fri"]
+
+[response_sla]
+hours = 4               # business hours to reply to clients / leads
+warn_before_minutes = 60
+# Categories that are held to the SLA (high-priority mail is always included)
+categories = ["client", "lead", "partner"]
+
+[schedule]
+morning_brief = "08:30"
+inbox_check_minutes = 15
+sla_check_minutes = 15
+task_reminder_minutes = 10
+task_reminder_lead_minutes = 30
+
+[alerts]
+instant_high_priority = true   # WhatsApp ping for every new high-priority email
+
+[[goals]]
+name = "Develop the business"
+measure = "New leads, client follow-ups done on time, deals moving forward"
+
+[[goals]]
+name = "Give proper responses"
+measure = "Every client/lead message answered within the response SLA"
+
+[[goals]]
+name = "Deliver high quality"
+measure = "Deadlines met, no rework, positive client feedback"
