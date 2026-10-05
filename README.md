@@ -19,6 +19,26 @@ The first start takes about a minute while it sets up. Your browser then opens *
 
 Everything you see is sample data, kept in its own file (`data/demo.db`). Nothing is sent anywhere: "sending" a draft only marks it as sent inside the demo. Press **Ctrl+C** in the window to stop it. If port 8080 is busy, use `--port 8090`.
 
+## Connect your accounts
+
+Sign in to the console and open **Integrations**. Each service has a card:
+
+| Service | How you connect |
+|---|---|
+| Claude | Paste an API key |
+| Gmail | Paste your Google app's client ID and secret, then press **Connect with Google** |
+| Outlook / Microsoft 365 | Paste your Microsoft app ID, then press **Connect with Microsoft** |
+| Todoist | Paste your API token |
+| WhatsApp | Fill in the Meta details, then **Send me a test message** |
+
+Every card shows:
+- its status: **Connected**, **Needs attention** or **Not connected**
+- which account it's connected as, and when it was last checked
+- step-by-step setup instructions
+- the exact redirect or webhook address to copy into Google, Microsoft or Meta
+
+Keys and sign-ins are stored **encrypted** on your server, and the page never shows them again (only the last 4 characters). Every morning the agent re-tests each connection and sends you a WhatsApp alert if one stops working, for example when Google's sign-in expires. A value in `.env` still overrides the page, if you prefer files.
+
 ## What it does
 
 | Job | When | What you get on WhatsApp |

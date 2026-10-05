@@ -28,6 +28,7 @@ from .connectors.gmail import sender_name
 from .connectors.todoist import localize
 from .db import row_dt
 from .progress import EVENT_KINDS, compute, team_stats, weekly_series
+from . import integrations as integ
 from .team import (TeamError, accept_invite, authenticate, can_change, create_invite, create_reset_link,
                    ensure_owner, parse_due, set_active, token_hash)
 from .templates import env, manifest as build_manifest
@@ -94,6 +95,7 @@ def mount_dashboard(app: FastAPI, settings: Settings, agent_factory: Callable, s
         else:
             log.warning("Brand logo %s not found or not .svg/.png/.jpg/.webp; using the NeuraNova logo", custom)
     env.globals["brand"] = brand
+    env.globals["owner_id"] = settings.owner_id
     failures: dict[str, list[float]] = {}
     if store is not None and settings.secret("DASHBOARD_PASSWORD"):
         ensure_owner(store, settings)
@@ -235,8 +237,12 @@ def mount_dashboard(app: FastAPI, settings: Settings, agent_factory: Callable, s
             members=store.users(),
             my_tasks=[task_view(t, me, now) for t in store.team_tasks("open", assignee_id=me["id"])],
             kinds=EVENT_KINDS, events=store.recent_events(15),
-            drafts=[], waiting=[], tasks=[], tasks_error="", activity=[],
+            drafts=[], waiting=[], tasks=[], tasks_error="", activity=[], setup=None,
         )
+        if is_owner and sessions:
+            cards = integ.view(settings, store, public_url or str(request.base_url))
+            ctx["setup"] = {"total": len(cards), "connected": sum(1 for c in cards if c["status"] == "connected"),
+                            "missing": [c["title"] for c in cards if c["status"] != "connected"]}
         if is_owner:
             for d in store.pending_drafts():
                 ctx["drafts"].append({"id": d["id"], "to": sender_name(d["sender"]), "subject": d["subject"],
@@ -490,3 +496,141 @@ def mount_dashboard(app: FastAPI, settings: Settings, agent_factory: Callable, s
             return g
         g[0].store.revoke_invite(th)
         return back("/team#people", "Invite revoked.")
+
+    # --- integrations (founder only: they hold the founder's mailbox and keys) ------------------
+
+    def base_url(request: Request) -> str:
+        return public_url or str(request.base_url).rstrip("/")
+
+    def founder(request: Request, csrf: str | None = None):
+        """(agent, user) for the signed-in founder, else an error Response. Checks CSRF when given."""
+        agent = agent_factory()
+        user, cookie = current(request, agent)
+        if not user:
+            return RedirectResponse("/login", status_code=303)
+        if user["id"] != settings.owner_id:
+            return Response("Only the founder can manage integrations.", status_code=403)
+        if csrf is not None and not hmac.compare_digest(csrf or "", sessions.csrf(cookie)):
+            return Response("Session expired - reload the page and sign in again.", status_code=403)
+        return agent, user
+
+    @app.get("/integrations")
+    def integrations_page(request: Request, msg: str = "") -> Response:
+        g = founder(request)
+        if isinstance(g, Response):
+            return g
+        agent, me = g
+        cards = integ.view(settings, agent.store, base_url(request))
+        return page("integrations", me=me, csrf=sessions.csrf(request.cookies.get(COOKIE, "")), today=today_text(),
+                    msg=msg, cards=cards, connected=sum(1 for c in cards if c["status"] == "connected"))
+
+    def form_values(name: str, form) -> dict:
+        allowed = {f.key: f for f in integ.BY_NAME[name].fields}
+        values = {}
+        for key, f in allowed.items():
+            if integ.from_env(settings, key):
+                continue  # .env wins; never overwrite it from the page
+            raw = (form.get(key) or "").strip()
+            if key == "WHATSAPP_RECIPIENT":
+                from .team import digits
+                raw = digits(raw)
+            values[key] = raw[:4000]
+        return values
+
+    @app.post("/integrations/test-all")
+    def test_all(request: Request, csrf: str = Form("")) -> Response:
+        g = founder(request, csrf)
+        if isinstance(g, Response):
+            return g
+        agent, _ = g
+        merged = integ.with_integrations(settings, agent.store)
+        results = [integ.run_check(c.name, settings, agent.store)[0]
+                   for c in integ.CATALOG if integ.is_configured(c.name, merged)]
+        return back("/integrations", f"Tested {len(results)}: {sum(results)} working, {len(results) - sum(results)} need attention.")
+
+    @app.post("/integrations/{name}/save")
+    async def save(request: Request, name: str) -> Response:
+        form = await request.form()
+        g = founder(request, form.get("csrf", ""))
+        if isinstance(g, Response):
+            return g
+        agent, me = g
+        if name not in integ.BY_NAME:
+            return back("/integrations", "Unknown integration.")
+        values = form_values(name, form)
+        if name == "whatsapp" and not integ.with_integrations(settings, agent.store).secret("WHATSAPP_VERIFY_TOKEN"):
+            values["WHATSAPP_VERIFY_TOKEN"] = integ.new_verify_token()
+        integ.save_values(agent.store, settings, name, values, me["id"])
+        agent.store.log("integration_saved", integration=name, by=me["id"])
+        if not integ.is_configured(name, integ.with_integrations(settings, agent.store)):
+            return back(f"/integrations#{name}", "Saved. " + ("Now press Connect." if integ.BY_NAME[name].oauth
+                                                              else "Fill in the remaining fields to connect."))
+        ok, message = integ.run_check(name, settings, agent.store)
+        return back(f"/integrations#{name}", ("✓ " if ok else "✕ ") + f"{integ.BY_NAME[name].title}: {message}")
+
+    @app.post("/integrations/{name}/test")
+    def test_one(request: Request, name: str, csrf: str = Form("")) -> Response:
+        g = founder(request, csrf)
+        if isinstance(g, Response):
+            return g
+        if name not in integ.BY_NAME:
+            return back("/integrations", "Unknown integration.")
+        ok, message = integ.run_check(name, settings, g[0].store)
+        return back(f"/integrations#{name}", ("✓ " if ok else "✕ ") + f"{integ.BY_NAME[name].title}: {message}")
+
+    @app.post("/integrations/{name}/disconnect")
+    def disconnect_one(request: Request, name: str, csrf: str = Form("")) -> Response:
+        g = founder(request, csrf)
+        if isinstance(g, Response):
+            return g
+        if name not in integ.BY_NAME:
+            return back("/integrations", "Unknown integration.")
+        integ.disconnect(name, g[0].store, g[1]["id"])
+        return back(f"/integrations#{name}", f"{integ.BY_NAME[name].title} disconnected. Values set in .env still apply.")
+
+    @app.post("/integrations/whatsapp/send-test")
+    def whatsapp_test(request: Request, csrf: str = Form("")) -> Response:
+        g = founder(request, csrf)
+        if isinstance(g, Response):
+            return g
+        agent, _ = g
+        try:
+            agent.notifier.send("✅ NeuraNova is connected to WhatsApp. Alerts and drafts will arrive here.")
+        except Exception as exc:
+            return back("/integrations#whatsapp", f"✕ WhatsApp: {integ._plain_error(exc)}")
+        return back("/integrations#whatsapp", "✓ Test message sent. Check your WhatsApp.")
+
+    @app.post("/integrations/{provider}/connect")
+    async def oauth_connect(request: Request, provider: str) -> Response:
+        form = await request.form()
+        g = founder(request, form.get("csrf", ""))
+        if isinstance(g, Response):
+            return g
+        agent, me = g
+        name = {"google": "gmail", "microsoft": "outlook"}.get(provider)
+        if name is None:
+            return back("/integrations", "Unknown sign-in provider.")
+        values = {k: v for k, v in form_values(name, form).items() if v}
+        if values:
+            integ.save_values(agent.store, settings, name, values, me["id"])
+        try:
+            url = integ.start_oauth(provider, settings, agent.store, base_url(request), me["id"])
+        except Exception as exc:
+            return back(f"/integrations#{name}", str(exc))
+        return RedirectResponse(url, status_code=303)
+
+    @app.get("/integrations/{provider}/callback")
+    def oauth_callback(request: Request, provider: str) -> Response:
+        # Coming back from Google/Microsoft is a cross-site navigation, so the SameSite=Strict session
+        # cookie is not sent here. The single-use, 15-minute state (bound to the founder who started it)
+        # authorises this step; the page then moves on with a fresh same-site navigation.
+        if provider not in ("google", "microsoft"):
+            return Response(status_code=404)
+        agent = agent_factory()
+        try:
+            msg = integ.finish_oauth(provider, settings, agent.store, dict(request.query_params), settings.owner_id)
+        except Exception as exc:
+            log.warning("OAuth %s failed: %s", provider, exc)
+            msg = f"✕ {exc}"
+        name = "gmail" if provider == "google" else "outlook"
+        return page("return", url=f"/integrations?msg={quote(msg)}#{name}")

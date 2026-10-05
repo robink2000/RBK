@@ -27,6 +27,7 @@ from .commands import handle
 from .config import Settings
 from .dashboard import mount_dashboard
 from .db import Store
+from .integrations import with_integrations
 from .notify import inbound_key
 
 log = logging.getLogger(__name__)
@@ -58,10 +59,13 @@ def message_text(msg: dict) -> str | None:
 
 def create_app(settings: Settings, agent_factory: Callable, store: Store | None = None) -> FastAPI:
     app = FastAPI(title="NeuraNova agent", docs_url=None, redoc_url=None, openapi_url=None)
-    verify_token = settings.secret("WHATSAPP_VERIFY_TOKEN")
-    app_secret = settings.secret("WHATSAPP_APP_SECRET")
-    owner = _digits(settings.secret("WHATSAPP_RECIPIENT"))
     store = store or Store(settings.db_path, settings.workspace_id, settings.owner_id)
+
+    def live():
+        """WhatsApp settings can be changed in the console, so read them per request."""
+        s = with_integrations(settings, store)
+        return s.secret("WHATSAPP_VERIFY_TOKEN"), s.secret("WHATSAPP_APP_SECRET"), _digits(s.secret("WHATSAPP_RECIPIENT"))
+
     mount_dashboard(app, settings, agent_factory, store)
 
     def process(text: str, user_id: str | None) -> None:
@@ -84,6 +88,7 @@ def create_app(settings: Settings, agent_factory: Callable, store: Store | None 
     @app.get("/webhook")
     def verify(request: Request) -> Response:
         q = request.query_params
+        verify_token, _, _ = live()
         if verify_token and q.get("hub.mode") == "subscribe" and hmac.compare_digest(
                 q.get("hub.verify_token", ""), verify_token):
             return PlainTextResponse(q.get("hub.challenge", ""))
@@ -92,6 +97,7 @@ def create_app(settings: Settings, agent_factory: Callable, store: Store | None 
     @app.post("/webhook")
     async def receive(request: Request, background: BackgroundTasks) -> Response:
         body = await request.body()
+        _, app_secret, owner = live()
         if not valid_signature(app_secret, body, request.headers.get("x-hub-signature-256")):
             log.warning("Rejected webhook call with a bad or missing signature")
             return Response(status_code=403)

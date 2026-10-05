@@ -17,16 +17,38 @@ SCOPES = ["Mail.Read", "Mail.Send"]
 GRAPH = "https://graph.microsoft.com/v1.0"
 
 
-def _app(client_id: str, tenant: str, cache_file: str):
+def make_app(client_id: str, tenant: str = "common", cache_text: str = "", client_secret: str = ""):
+    """MSAL app with a token cache. A client secret means a "Web" app registration (server sign-in);
+    without one it's a public client (device code, or localhost redirect)."""
     import msal
 
     cache = msal.SerializableTokenCache()
-    if Path(cache_file).exists():
-        cache.deserialize(Path(cache_file).read_text())
-    app = msal.PublicClientApplication(
-        client_id, authority=f"https://login.microsoftonline.com/{tenant}", token_cache=cache
-    )
+    if cache_text:
+        cache.deserialize(cache_text)
+    authority = f"https://login.microsoftonline.com/{tenant or 'common'}"
+    if client_secret:
+        app = msal.ConfidentialClientApplication(client_id, client_credential=client_secret, authority=authority,
+                                                 token_cache=cache)
+    else:
+        app = msal.PublicClientApplication(client_id, authority=authority, token_cache=cache)
     return app, cache
+
+
+def _app(client_id: str, tenant: str, cache_file: str):
+    text = Path(cache_file).read_text() if Path(cache_file).exists() else ""
+    return make_app(client_id, tenant, text)
+
+
+def token_from_cache(client_id: str, tenant: str, cache_text: str, client_secret: str = "", on_change=None):
+    """(access_token, account username) from a saved cache; refreshes silently when needed."""
+    app, cache = make_app(client_id, tenant, cache_text, client_secret)
+    accounts = app.get_accounts()
+    result = app.acquire_token_silent(SCOPES, account=accounts[0]) if accounts else None
+    if not result or "access_token" not in result:
+        raise RuntimeError("Outlook sign-in has expired - reconnect Outlook")
+    if cache.has_state_changed and on_change:
+        on_change(cache.serialize())
+    return result["access_token"], accounts[0].get("username", "")
 
 
 def _save(cache, cache_file: str) -> None:

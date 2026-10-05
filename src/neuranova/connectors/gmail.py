@@ -32,31 +32,45 @@ def authorize(client_secret_file: str, token_file: str) -> None:
     Path(token_file).write_text(creds.to_json())
 
 
-def _credentials(token_file: str):
+def credentials(token_file: str | None = None, token_json: str | None = None, on_refresh=None):
+    """Google credentials from the console's saved sign-in (`token_json`) or a token file."""
+    import json
+
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
 
-    creds = Credentials.from_authorized_user_file(token_file)
+    if token_json:
+        creds = Credentials.from_authorized_user_info(json.loads(token_json))
+    else:
+        creds = Credentials.from_authorized_user_file(token_file)
     if not creds.has_scopes(SCOPES):
-        raise RuntimeError("Gmail token is missing the send permission - run `neuranova auth gmail` again")
+        raise RuntimeError("Gmail is missing the send permission - reconnect Gmail")
     if not creds.valid:
         if creds.expired and creds.refresh_token:
             creds.refresh(Request())
-            Path(token_file).write_text(creds.to_json())
+            if token_json is not None:
+                if on_refresh:
+                    on_refresh(creds.to_json())
+            else:
+                Path(token_file).write_text(creds.to_json())
         else:
-            raise RuntimeError("Gmail token is invalid - run `neuranova auth gmail` again")
+            raise RuntimeError("Gmail sign-in has expired - reconnect Gmail")
     return creds
 
 
 class GmailConnector:
     name = "gmail"
 
-    def __init__(self, token_file: str, service=None):
+    def __init__(self, token_file: str | None = None, service=None, token_json: str | None = None, on_refresh=None):
         if service is None:
             from googleapiclient.discovery import build
 
-            service = build("gmail", "v1", credentials=_credentials(token_file), cache_discovery=False)
+            creds = credentials(token_file, token_json, on_refresh)
+            service = build("gmail", "v1", credentials=creds, cache_discovery=False)
         self.api = service.users()
+
+    def profile_email(self) -> str:
+        return self.api.getProfile(userId="me").execute().get("emailAddress", "")
 
     def _list(self, query: str, limit: int = 100) -> list[dict]:
         ids, page = [], None

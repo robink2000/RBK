@@ -114,6 +114,19 @@ CREATE TABLE IF NOT EXISTS team_tasks (
 );
 CREATE INDEX IF NOT EXISTS team_tasks_open ON team_tasks (workspace_id, status, assignee_id);
 
+CREATE TABLE IF NOT EXISTS integrations (
+    workspace_id TEXT NOT NULL,
+    name         TEXT NOT NULL,             -- gmail | outlook | todoist | whatsapp | claude
+    data_enc     TEXT NOT NULL DEFAULT '',  -- encrypted JSON of keys / tokens
+    account      TEXT NOT NULL DEFAULT '',  -- what it's connected as, e.g. an email address
+    status       TEXT NOT NULL DEFAULT 'not_connected',  -- connected | error | not_connected
+    message      TEXT NOT NULL DEFAULT '',
+    checked_at   TEXT,
+    updated_by   TEXT NOT NULL DEFAULT '',
+    updated_at   TEXT,
+    PRIMARY KEY (workspace_id, name)
+);
+
 CREATE TABLE IF NOT EXISTS inbound_seen (
     message_id TEXT PRIMARY KEY,
     at         TEXT NOT NULL
@@ -565,6 +578,42 @@ class Store:
                AND done_at >= ? AND done_at < ?""",
             (self.workspace_id, _iso(start), _iso(end)),
         ).fetchall()
+
+    # --- integrations ------------------------------------------------------------
+
+    def integration(self, name: str) -> sqlite3.Row | None:
+        return self.conn.execute("SELECT * FROM integrations WHERE workspace_id = ? AND name = ?",
+                                 (self.workspace_id, name)).fetchone()
+
+    def integrations(self) -> list[sqlite3.Row]:
+        return self.conn.execute("SELECT * FROM integrations WHERE workspace_id = ?",
+                                 (self.workspace_id,)).fetchall()
+
+    def save_integration(self, name: str, data_enc: str, updated_by: str) -> None:
+        now = _iso(datetime.now(timezone.utc))
+        self.conn.execute(
+            """INSERT INTO integrations (workspace_id, name, data_enc, updated_by, updated_at)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT (workspace_id, name) DO UPDATE SET data_enc = excluded.data_enc,
+               updated_by = excluded.updated_by, updated_at = excluded.updated_at""",
+            (self.workspace_id, name, data_enc, updated_by, now),
+        )
+        self.conn.commit()
+
+    def set_integration_status(self, name: str, status: str, message: str = "", account: str | None = None) -> None:
+        self.conn.execute(
+            """INSERT INTO integrations (workspace_id, name, status, message, account, checked_at)
+               VALUES (?, ?, ?, ?, COALESCE(?, ''), ?)
+               ON CONFLICT (workspace_id, name) DO UPDATE SET status = excluded.status,
+               message = excluded.message, account = COALESCE(?, integrations.account),
+               checked_at = excluded.checked_at""",
+            (self.workspace_id, name, status, message[:500], account, _iso(datetime.now(timezone.utc)), account),
+        )
+        self.conn.commit()
+
+    def delete_integration(self, name: str) -> None:
+        self.conn.execute("DELETE FROM integrations WHERE workspace_id = ? AND name = ?", (self.workspace_id, name))
+        self.conn.commit()
 
     # --- inbound WhatsApp ---------------------------------------------------
 
