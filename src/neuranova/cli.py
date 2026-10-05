@@ -27,6 +27,8 @@ def build_agent(settings: Settings):
     store = Store(settings.db_path, settings.workspace_id, settings.owner_id)
     base_settings = settings
     settings = with_integrations(settings, store)  # keys and sign-ins connected in the console
+    from .pa import prefs
+    settings = prefs.apply(settings, store)        # company, hours and schedules set in Settings
     ensure_owner(store, settings)
 
     mail = []
@@ -82,7 +84,10 @@ def run_forever(settings: Settings) -> None:
 
     from .db import Store
     from .integrations import with_integrations
-    settings_now = with_integrations(settings, Store(settings.db_path, settings.workspace_id, settings.owner_id))
+    from .pa import prefs
+    _store = Store(settings.db_path, settings.workspace_id, settings.owner_id)
+    settings = prefs.apply(settings, _store)       # schedule times set in Settings
+    settings_now = with_integrations(settings, _store)
     webhook = bool(settings_now.secret("WHATSAPP_VERIFY_TOKEN"))
     if webhook and not settings_now.secret("WHATSAPP_APP_SECRET"):
         raise SystemExit("WHATSAPP_APP_SECRET is required when the webhook is enabled (see docs/SETUP.md)")

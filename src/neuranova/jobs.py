@@ -180,10 +180,104 @@ class Agent:
             done += 1
         return done
 
+    # --- outgoing messages (Safe Mode: they wait for approval) ---------------------------
+
+    def compose(self, channel: str, recipient: str, purpose: str, by_user: str, recipient_name: str = "",
+                item_id: int | None = None, subject: str = "") -> int:
+        """Draft a WhatsApp or email message with the AI and put it in the approvals outbox."""
+        from .pa.writing import draft_message
+
+        llm = getattr(self.brain, "llm", None)
+        body, subject = draft_message(llm, channel, recipient_name or recipient, purpose,
+                                      signature=self.settings.reply_signature, tone=self.settings.reply_tone,
+                                      company=self.settings.brand.get("name", "NeuraNova"), subject=subject)
+        outbox_id = self.pa.add_outbox(channel, recipient, body, by_user, recipient_name=recipient_name,
+                                       subject=subject, reason=purpose[:300], item_id=item_id)
+        self.store.log("outbox_drafted", outbox=outbox_id, channel=channel, by=by_user)
+        return outbox_id
+
+    def send_outbox(self, outbox_id: int, by_user: str, body: str | None = None) -> str:
+        """Send an approved message. Returns a plain result for the founder."""
+        o = self.pa.outbox_item(outbox_id)
+        if o is None:
+            return f"No message #{outbox_id}."
+        if o["status"] != "pending":
+            return f"Message #{outbox_id} is already {o['status']}."
+        if body is not None and body.strip() and body.strip() != o["body"]:
+            self.pa.conn.execute("UPDATE outbox SET body = ? WHERE id = ?", (body.strip(), outbox_id))
+            self.pa.conn.commit()
+            o = self.pa.outbox_item(outbox_id)
+        if not self.pa.transition_outbox(outbox_id, "pending", "sending", by=by_user):
+            return f"Message #{outbox_id} is already being handled."
+        try:
+            if o["channel"] == "whatsapp":
+                if not self.notifier_factory:
+                    raise RuntimeError("WhatsApp isn't connected")
+                self.notifier_factory(o["recipient"]).send(o["body"])
+                contact = self.pa.contact_for(phone=o["recipient"], name=o["recipient_name"])
+                self.pa.add_message("whatsapp", "out", f"outbox-{outbox_id}", o["body"], self._now(),
+                                    recipient=o["recipient"], contact_id=contact)
+                self.pa.mark_thread_replied("whatsapp", contact, self._now())
+            else:
+                conn = next((c for c in self.mail if hasattr(c, "send_new")), None)
+                if conn is None:
+                    raise RuntimeError("No email account is connected")
+                conn.send_new(o["recipient"], o["subject"] or "Follow-up", o["body"])
+        except Exception as exc:
+            log.exception("Sending outbox %s failed", outbox_id)
+            self.pa.transition_outbox(outbox_id, "sending", "pending", by=by_user, error=str(exc)[:300])
+            return f"❌ Couldn't send message #{outbox_id}: {str(exc)[:160]}. It's still waiting in Approvals."
+        self.pa.transition_outbox(outbox_id, "sending", "sent", by=by_user)
+        if o["item_id"]:
+            self.pa.update_item(o["item_id"], by_user, note=f"{o['channel'].capitalize()} sent to {o['recipient_name'] or o['recipient']}",
+                                follow_up_at=self._now() + timedelta(days=1))
+        self.store.log("outbox_sent", outbox=outbox_id, channel=o["channel"], by=by_user)
+        return f"✅ Sent to {o['recipient_name'] or o['recipient']}."
+
+    def reject_outbox(self, outbox_id: int, by_user: str) -> str:
+        if self.pa.transition_outbox(outbox_id, "pending", "rejected", by=by_user):
+            self.store.log("outbox_rejected", outbox=outbox_id, by=by_user)
+            return f"Message #{outbox_id} discarded."
+        return f"Message #{outbox_id} is not waiting for approval."
+
+    def draft_followups(self) -> int:
+        """Overdue promises with a reachable contact get a polite follow-up draft (once per expected date).
+        Sent straight away only if Safe Mode is off and follow-ups are trusted."""
+        from .pa import prefs
+
+        if not prefs.get(self.store)["auto_draft_followups"]:
+            return 0
+        now = self._now()
+        made = 0
+        for row in self.pa.items(kind="waiting", status="active", limit=500):
+            due = row_dt(row["due_at"]) if row["due_at"] else None
+            if not due or due > now or not row["contact_id"]:
+                continue
+            key = f"followup:{row['id']}:{row['due_at']}"
+            if self.store.reminder_sent_check(key):
+                continue
+            contact = self.pa.contact(row["contact_id"])
+            channel, recipient = ("whatsapp", contact["phone"]) if contact["phone"] else ("email", contact["email"])
+            if not recipient:
+                continue
+            purpose = (f"Politely follow up on: {row['title']}. It was expected by "
+                       f"{due.astimezone(self.settings.tz):%A %d %B, %H:%M}. Ask them to share it, or an updated "
+                       f"time, today.")
+            outbox_id = self.compose(channel, recipient, purpose, "PA", recipient_name=contact["name"],
+                                     item_id=row["id"], subject=f"Follow-up: {row['title'][:60]}")
+            self.store.reminder_sent(key, "pa")
+            made += 1
+            if prefs.may_send_automatically(self.store, "followups"):
+                self.send_outbox(outbox_id, "PA (trusted automation)")
+        return made
+
     def proactive(self) -> dict:
         """Tell the founder what needs attention (digest, no repeats, no spam)."""
-        from .pa import proactive
-        return proactive.run(self.store, self.settings, self.notifier.send)
+        from .pa import prefs, proactive
+        drafted = self.draft_followups()
+        if not prefs.get(self.store)["notify_digest"]:
+            return {"sent": 0, "drafted": drafted}
+        return {**proactive.run(self.store, self.settings, self.notifier.send), "drafted": drafted}
 
     def run_qa(self, environment: str) -> dict:
         """Run the application checks for one environment, record issues, alert on Production problems."""
@@ -212,7 +306,7 @@ class Agent:
         self.pa.finish_qa_run(run_id, "failed" if failed else "passed", qa.summary_text(results, counts),
                               qa.results_json(results))
         self.store.log("qa_run", environment=environment, **counts)
-        if environment == "production" and (counts["new"] or counts["regressions"]):
+        if environment == "production" and (counts["new"] or counts["regressions"]) and self._notify_on("qa"):
             lines = [f"🚨 NeuraNova Production: {len(failed)} check(s) failing"]
             lines += [f"- {r.role} · {r.workflow}: {r.error[:120]}" for r in failed[:5]]
             self.notifier.send("\n".join(lines), teaser=f"NeuraNova Production: {len(failed)} check(s) failing.")
@@ -595,7 +689,7 @@ class Agent:
             log.exception("Could not save the report to Google Drive")
 
     def weekly_report(self) -> str:
-        out = self.report("weekly", deliver=True)
+        out = self.report("weekly", deliver=self._notify_on("weekly"))
         for kind in ("sales", "quality", "qa"):  # saved for the Reports page, not sent (no spam)
             try:
                 self.report(kind)
@@ -604,14 +698,18 @@ class Agent:
         self.store.put("last_weekly_report", out["text"])
         return out["text"]
 
+    def _notify_on(self, kind: str) -> bool:
+        from .pa import prefs
+        return bool(prefs.get(self.store).get(f"notify_{kind}", True))
+
     def morning_brief(self) -> str:
         self.check_inbox()
-        out = self.report("morning", deliver=True)
+        out = self.report("morning", deliver=self._notify_on("morning"))
         self.store.put("last_brief", self._now().isoformat())
         return out["text"]
 
     def eod_summary(self) -> str:
-        return self.report("eod", deliver=True)["text"]
+        return self.report("eod", deliver=self._notify_on("eod"))["text"]
 
     def monthly_report(self) -> str:
-        return self.report("monthly", deliver=True)["text"]
+        return self.report("monthly", deliver=self._notify_on("monthly"))["text"]

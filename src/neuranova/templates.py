@@ -47,6 +47,29 @@ BASE = """<!doctype html>
   --good-ink: #0ca30c;
 }
 * { box-sizing: border-box; }
+/* app shell: fixed sidebar on wide screens, a scrolling bar on phones */
+nav.side { position: fixed; inset: 0 auto 0 0; width: 236px; background: var(--surface); border-right: 1px solid var(--border);
+           display: flex; flex-direction: column; gap: 14px; padding: calc(16px + env(safe-area-inset-top, 0px)) 14px 16px; z-index: 5; }
+main:has(> nav.side) { margin-left: 236px; max-width: 1240px; }
+nav.side .brand img { width: 36px; height: 36px; }
+.pa-tag { font: 700 11px var(--font-display); color: var(--accent-ink); background: var(--accent); border-radius: 6px; padding: 1px 6px; vertical-align: middle; }
+.nav-links { display: flex; flex-direction: column; gap: 2px; flex: 1; overflow-y: auto; }
+.nav-links a { color: var(--ink-2); text-decoration: none; padding: 8px 10px; border-radius: 8px; font-weight: 550; font-size: 14px; }
+.nav-links a:hover { background: var(--page); color: var(--ink); }
+.nav-links a.on { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--ink); }
+.me { border-top: 1px solid var(--grid); padding-top: 10px; display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 14px; }
+header.pagehead { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+header.pagehead h1 { font-size: 24px; }
+form.quick input { width: min(320px, 100%); }
+@media (max-width: 900px) {
+  nav.side { position: static; width: auto; flex-direction: row; flex-wrap: wrap; align-items: center; padding: 10px 0; border-right: 0;
+             border-bottom: 1px solid var(--border); background: transparent; margin-bottom: 12px; gap: 8px; }
+  main:has(> nav.side) { margin-left: auto; }
+  .nav-links { flex-direction: row; overflow-x: auto; flex-basis: 100%; order: 3; padding-bottom: 4px; }
+  .nav-links a { white-space: nowrap; }
+  .me { border: 0; padding: 0; margin-left: auto; }
+  nav.side .brand-tag { display: none; }
+}
 body { margin: 0; background: var(--page); color: var(--ink); font: 15px/1.5 var(--font-body); }
 h1, h2, .hero, .brand-name { font-family: var(--font-display); text-wrap: balance; }
 h2 { letter-spacing: -0.005em; }
@@ -199,17 +222,31 @@ LOGIN = """{% extends "base" %}{% from "nav" import brand_logo, brand_wordmark w
 
 NAV = """{% macro brand_logo() %}<img src="/brand/logo" alt="{{ brand.name }} logo" width="40" height="40">{% endmacro %}
 {% macro brand_wordmark() %}{% if brand.name == 'NeuraNova' %}Neura<span class="nova">Nova</span>{% else %}{{ brand.name }}{% endif %}{% endmacro %}
-{% macro top(page, user, csrf, today) %}
-<header>
-  <a class="brand" href="/" aria-label="{{ brand.name }} home">{{ brand_logo() }}
-    <div><div class="brand-name">{{ brand_wordmark() }}</div><div class="sub">{{ today }}</div></div></a>
-  <nav class="top" aria-label="Main">
-    <a href="/" class="{{ 'on' if page == 'home' else '' }}">Home</a>
-    <a href="/team" class="{{ 'on' if page == 'team' else '' }}">Team</a>
-    {% if user.id == owner_id %}<a href="/integrations" class="{{ 'on' if page == 'integrations' else '' }}">Integrations</a>{% endif %}
-    <span class="who">{{ user.name }} · {{ user.role }}</span>
+{% macro top(page, user, csrf, today, title='') %}
+{% set founder = user.id == owner_id %}
+{% set nav = [('home', '/', 'Dashboard', True), ('today', '/today', 'Today', True), ('tasks', '/tasks', 'Tasks', True),
+              ('business', '/business', 'Business', True), ('communications', '/communications', 'Communications', founder),
+              ('qa', '/qa', 'Application QA', True), ('quality', '/quality', 'Quality', True),
+              ('reports', '/reports', 'Reports', user.role == 'admin'), ('assistant', '/assistant', 'AI Assistant', True),
+              ('settings', '/settings', 'Settings', user.role == 'admin')] %}
+<nav class="side" aria-label="Main">
+  <a class="brand" href="/" aria-label="{{ brand.name }} PA home">{{ brand_logo() }}
+    <div><div class="brand-name">{{ brand_wordmark() }} <span class="pa-tag">PA</span></div><div class="brand-tag">Personal Assistant</div></div></a>
+  <div class="nav-links">
+  {% for key, href, label, show in nav if show %}<a href="{{ href }}" class="{{ 'on' if page == key else '' }}" {{ 'aria-current=page' if page == key else '' }}>{{ label }}</a>{% endfor %}
+  </div>
+  <div class="me">
+    <div><strong>{{ user.name }}</strong><div class="meta">{{ 'Founder' if founder else user.role|capitalize }}{% if safe_mode %} · <span title="Outgoing messages wait for approval">Safe Mode on</span>{% endif %}</div></div>
     <form class="inline" method="post" action="/logout"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link" type="submit">Sign out</button></form>
-  </nav>
+  </div>
+</nav>
+<header class="pagehead">
+  {% set titles = {'home': 'Dashboard', 'today': 'Today', 'tasks': 'Tasks', 'business': 'Business',
+                   'communications': 'Communications', 'qa': 'Application QA', 'quality': 'Quality', 'reports': 'Reports',
+                   'assistant': 'AI Assistant', 'settings': 'Settings', 'team': 'Team', 'integrations': 'Integrations'} %}
+  <div><h1>{{ title or titles.get(page, '') }}</h1>
+  <div class="sub">{{ today }}</div></div>
+  <form class="quick" method="get" action="/search" role="search"><input name="q" type="search" placeholder="Search tasks, people, leads…" aria-label="Search"></form>
 </header>
 {% endmacro %}
 

@@ -339,6 +339,28 @@ class ImapConnector:
             conn.logout()
         return reply["Message-ID"]
 
+    def send_new(self, to: str, subject: str, body: str) -> str:
+        msg = MimeMessage()
+        msg["From"], msg["To"], msg["Subject"] = self.address, to, subject
+        msg["Message-ID"] = make_msgid(domain=self.address.rsplit("@", 1)[-1])
+        msg["Date"] = email.utils.formatdate(localtime=True)
+        msg.set_content(body)
+        server = self._smtp()
+        try:
+            server.send_message(msg)
+        finally:
+            server.quit()
+        if not (self.provider and self.provider.saves_sent):
+            conn = self._imap()
+            try:
+                folder = self._sent_folder(conn)
+                if folder:
+                    conn.append(f'"{folder}"', "\\Seen", imaplib.Time2Internaldate(datetime.now(timezone.utc)),
+                                msg.as_bytes())
+            finally:
+                conn.logout()
+        return msg["Message-ID"]
+
     # check ------------------------------------------------------------------------------
     def check(self) -> str:
         """Log in to both servers. Returns a short description; raises with a plain message on failure."""
