@@ -193,7 +193,17 @@ class Runner:
         before = page.url
         submit = page.locator("button[type=submit], input[type=submit], button:has-text('Log in'), "
                               "button:has-text('Login'), button:has-text('Sign in')").first
-        submit.click()
+        # don't tie the click to the navigation it starts: slow servers (and Windows) then fail the click itself
+        submit.click(no_wait_after=True)
+        error_box = page.locator("text=/invalid|incorrect|wrong password|failed/i")
+        deadline = time.monotonic() + self.timeout / 1000
+        while time.monotonic() < deadline:   # until we leave the login page or it shows an error
+            page.wait_for_timeout(250)
+            try:
+                if page.url != before or error_box.count() > 0:
+                    break
+            except Exception:
+                pass                         # page mid-navigation
         try:
             page.wait_for_load_state("networkidle", timeout=self.timeout)
         except Exception:

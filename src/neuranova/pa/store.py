@@ -356,12 +356,12 @@ class PAStore:
     def items_completed_between(self, start: datetime, end: datetime) -> list[sqlite3.Row]:
         return self.conn.execute(
             """SELECT i.*, u.name AS owner_name FROM items i LEFT JOIN users u ON u.id = i.owner_id
-               WHERE i.workspace_id = ? AND i.completed_at >= ? AND i.completed_at < ?""",
+               WHERE i.workspace_id = ? AND i.completed_at >= ? AND i.completed_at <= ?""",
             (self.ws, _iso(start), _iso(end)),
         ).fetchall()
 
     def items_created_between(self, start: datetime, end: datetime, kind: str | None = None) -> list[sqlite3.Row]:
-        q = "SELECT * FROM items WHERE workspace_id = ? AND created_at >= ? AND created_at < ?"
+        q = "SELECT * FROM items WHERE workspace_id = ? AND created_at >= ? AND created_at <= ?"
         args = [self.ws, _iso(start), _iso(end)]
         if kind:
             q += " AND kind = ?"

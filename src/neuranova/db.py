@@ -169,7 +169,7 @@ EMAIL_COLUMNS_V2 = {
 
 
 def _iso(dt: datetime | None) -> str | None:
-    return dt.astimezone(timezone.utc).isoformat() if dt else None
+    return dt.astimezone(timezone.utc).isoformat(timespec="microseconds") if dt else None
 
 
 def _dt(value: str | None) -> datetime | None:
