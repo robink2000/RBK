@@ -161,6 +161,51 @@ body:has(.login) main { display: grid; place-items: center; min-height: calc(100
 .login label { font-size: 13px; font-weight: 600; color: var(--ink-2); }
 .login button.primary { width: 100%; padding: 10px; font-size: 15px; margin-top: 4px; }
 @media (max-width: 520px) { body:has(.login)::before { opacity: .5; } .login { border-radius: 24px; aspect-ratio: auto; padding: 28px; } }
+/* friendlier shell: icons, quick add, page help */
+.ico { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.nav-links a { display: flex; align-items: center; gap: 10px; }
+.nav-links a .ico { opacity: .75; }
+.nav-links a.on .ico { opacity: 1; color: var(--nn-magenta); }
+header.pagehead .sub { max-width: 640px; }
+.head-actions { display: flex; gap: 10px; align-items: center; position: relative; }
+.quickadd > summary { list-style: none; display: inline-flex; align-items: center; gap: 6px; background: var(--nn-n); color: #fff; border: 0;
+  font-weight: 600; padding: 8px 14px; border-radius: 999px; box-shadow: 0 4px 14px rgba(135,5,161,.25); cursor: pointer; }
+.quickadd > summary::-webkit-details-marker { display: none; }
+.quickadd-pop { position: absolute; right: 0; top: calc(100% + 8px); width: min(380px, 90vw); background: var(--surface); border-radius: 16px;
+  padding: 16px; box-shadow: 0 16px 40px rgba(59,13,107,.22); display: grid; gap: 8px; z-index: 20; }
+.quickadd-pop label { font-weight: 600; color: var(--nn-title); }
+.quickadd-pop input[name=text] { width: 100%; font-size: 15px; padding: 10px; }
+.quickadd-row { display: flex; gap: 8px; } .quickadd-row select { flex: 1; }
+.flash { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.flash-x { border: 0; background: none; font-size: 20px; line-height: 1; color: var(--muted); padding: 0 4px; cursor: pointer; }
+@media (max-width: 900px) { .head-actions { width: 100%; } .head-actions form.quick { flex: 1; } form.quick input { width: 100%; } }
+/* compact item rows */
+ul.rows li.row-item, ul.list li.row-item { display: flex; align-items: flex-start; gap: 12px; padding: 10px 0; }
+.row-main { flex: 1; min-width: 0; }
+.row-main .k { margin: 0 0 0 6px; }
+.tick { width: 26px; height: 26px; border-radius: 50%; border: 2px solid rgba(135,5,161,.35); background: var(--surface); color: transparent;
+  display: inline-grid; place-items: center; padding: 0; font-size: 14px; font-weight: 700; flex: none; cursor: pointer; transition: all .15s; }
+.tick:hover { background: var(--nn-n); color: #fff; border-color: transparent; }
+.tick.ghost { border: 0; background: var(--nn-grad-soft); color: var(--nn-magenta); cursor: default; font-size: 13px; }
+.snooze { font-size: 12px; padding: 3px 10px; border-radius: 999px; background: var(--nn-grad-soft); border: 0; color: var(--nn-title); white-space: nowrap; }
+.meta .due { color: var(--nn-title); font-weight: 600; }
+h3.group-h { font: 600 13px var(--font-display); text-transform: uppercase; letter-spacing: .05em; color: var(--nn-title); margin: 18px 0 2px; }
+h3.group-h.over { color: var(--critical); }
+.quickbar-form { display: flex; gap: 8px; flex-wrap: wrap; }
+.quickbar-form input { flex: 1 1 320px; font-size: 15px; padding: 10px 12px; }
+.quickbar-form select { flex: 0 0 auto; }
+.backlink { display: inline-block; margin-bottom: 10px; text-decoration: none; font-weight: 600; }
+.form-grid .check input, .fields .check input { width: auto !important; }
+.fields .form-grid { align-items: start; }
+.gs-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+ul.gs-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); }
+ul.gs-list li { display: grid; grid-template-columns: 22px 1fr; column-gap: 10px; align-items: start; }
+ul.gs-list li .meta { grid-column: 2; display: block; }
+ul.gs-list li a { font-weight: 600; }
+ul.gs-list li.done { color: var(--muted); }
+.gs-dot { width: 22px; height: 22px; border-radius: 50%; display: inline-grid; place-items: center; font-size: 12px; font-weight: 700; flex: none;
+  background: var(--nn-grad-soft); color: var(--nn-magenta); }
+li.done .gs-dot { background: var(--good); color: #fff; }
 .acct { display: grid; grid-template-columns: 130px 1fr 1fr auto; gap: 6px; align-items: center; }
 @media (max-width: 700px) { .acct { grid-template-columns: 1fr; } }
 """
@@ -169,18 +214,24 @@ PA_MACROS = """
 {% macro flash(msg) %}{% if msg %}<div class="flash" role="status">{{ msg }}</div>{% endif %}{% endmacro %}
 
 {% macro item_line(i, csrf, back) %}
-<li>
-  <div><span class="k">{{ i.kind_label }}</span>{% if i.priority in ('urgent', 'high') %}<span class="k {{ i.priority }}">{{ i.priority }}</span>{% endif %}
-    {% if i.link %}<a class="item-title" href="{{ i.link }}">{{ i.title }}</a>{% else %}<strong>{{ i.title }}</strong>{% endif %}
-    {% for s in i.signals %}<span class="k sig">{{ s.replace('_', ' ') }}</span>{% endfor %}</div>
-  <div class="meta">{% if i.owner %}{{ i.owner }}{% elif i.kind not in ('email', 'whatsapp') %}<em>no owner</em>{% endif %}
-    {% if i.who %}{{ ' · ' if i.owner or i.kind not in ('email', 'whatsapp') }}{{ i.who }}{% endif %}{% if i.status %} · {{ i.status }}{% endif %}{% if i.stage and i.kind == 'lead' %} · {{ labels.lead_stages.get(i.stage, i.stage) }}{% endif %}
-    {% if i.due %} · <span class="{{ 'over' if i.overdue else '' }}">{{ 'overdue, was due' if i.overdue and i.kind not in ('whatsapp',) else ('waiting' if i.kind == 'whatsapp' else 'due') }} {{ i.due }}</span>{% endif %}
-    {% if i.next_action %} · next: {{ i.next_action }}{% endif %}</div>
-  {% if i.can_change and i.kind not in ('email', 'whatsapp') and i.status not in ('Closed', 'Verified') %}
-  <div class="task-actions">
-    <form class="inline" method="post" action="/tasks/{{ i.id }}"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="back" value="{{ back }}"><button type="submit" name="action" value="done">{{ 'Mark fixed' if i.kind == 'qa_issue' else '✓ Done' }}</button></form>
-  </div>{% endif %}
+{% set live = i.can_change and i.kind not in ('email', 'whatsapp') and i.status not in ('Closed', 'Verified') %}
+<li class="row-item">
+  {% if live %}<form class="inline" method="post" action="/tasks/{{ i.id }}"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="back" value="{{ back }}">
+    <button class="tick" type="submit" name="action" value="done" title="{{ 'Mark fixed (goes to retest)' if i.kind == 'qa_issue' else 'Mark done' }}" aria-label="{{ 'Mark fixed' if i.kind == 'qa_issue' else 'Mark done' }}: {{ i.title }}">✓</button></form>
+  {% else %}<span class="tick ghost" aria-hidden="true">{{ '✉' if i.kind == 'email' else ('💬' if i.kind == 'whatsapp' else '•') }}</span>{% endif %}
+  <div class="row-main">
+    <div>{% if i.link %}<a class="item-title" href="{{ i.link }}">{{ i.title }}</a>{% else %}<strong>{{ i.title }}</strong>{% endif %}
+      <span class="k">{{ i.kind_label }}</span>{% if i.priority in ('urgent', 'high') %}<span class="k {{ i.priority }}">{{ i.priority }}</span>{% endif %}
+      {% for sg in i.signals %}<span class="k sig">{{ sg.replace('_', ' ') }}</span>{% endfor %}</div>
+    <div class="meta">{% set bits = [] %}
+      {% if i.owner %}{% set _ = bits.append(i.owner) %}{% elif i.kind not in ('email', 'whatsapp') %}{% set _ = bits.append('no owner yet') %}{% endif %}
+      {% if i.who and i.who != i.owner %}{% set _ = bits.append(i.who) %}{% endif %}
+      {% if i.stage and i.kind == 'lead' %}{% set _ = bits.append(labels.lead_stages.get(i.stage, i.stage)) %}{% elif i.status and i.status not in ('Open',) %}{% set _ = bits.append(i.status) %}{% endif %}
+      {{ bits|join(' · ') }}{% if i.due %}{{ ' · ' if bits }}<span class="{{ 'over' if i.overdue else 'due' }}">{% if i.kind == 'whatsapp' %}waiting {{ i.due }}{% elif i.overdue %}was due {{ i.due }}{% else %}due {{ i.due }}{% endif %}</span>{% endif %}
+      {% if i.next_action %} · next: {{ i.next_action }}{% endif %}</div>
+  </div>
+  {% if live and (i.overdue or i.bucket == 'today') %}<form class="inline" method="post" action="/tasks/{{ i.id }}"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="back" value="{{ back }}">
+    <button class="snooze" type="submit" name="action" value="snooze" title="Move it to tomorrow">→ Tomorrow</button></form>{% endif %}
 </li>
 {% endmacro %}
 
@@ -227,7 +278,7 @@ SETUP = """{% extends "base" %}{% from "forms" import notify_fields, account_fie
     {% if key == 'company' %}
       <p class="hint">Tell the PA about your business hours. Every step can be skipped and changed later in Settings.</p>
       <label>Company name<input name="company_name" value="{{ s.company_name }}" maxlength="60"></label>
-      <label>Timezone<input name="timezone" value="{{ s.timezone }}" placeholder="Asia/Kolkata"></label>
+      <label>Timezone <small>(pick from the list or type, e.g. Asia/Kolkata for India)</small><input name="timezone" value="{{ s.timezone }}" placeholder="Asia/Kolkata" list="tzlist" autocomplete="off"><datalist id="tzlist"><option value="Asia/Kolkata"><option value="Asia/Dubai"><option value="Asia/Riyadh"><option value="Asia/Qatar"><option value="Asia/Singapore"><option value="Asia/Kuala_Lumpur"><option value="Asia/Tokyo"><option value="Australia/Sydney"><option value="Europe/London"><option value="Europe/Berlin"><option value="Africa/Nairobi"><option value="America/New_York"><option value="America/Chicago"><option value="America/Los_Angeles"><option value="UTC"></datalist></label>
       <div class="form-grid"><label>Work starts<input name="work_start" type="time" value="{{ s.work_start }}"></label><label>Work ends<input name="work_end" type="time" value="{{ s.work_end }}"></label>
       <label>Reply promise (business hours)<input name="reply_hours" inputmode="decimal" value="{{ s.reply_hours }}"></label></div>
       <div class="days">{% for d in ['mon','tue','wed','thu','fri','sat','sun'] %}<label class="check"><input type="checkbox" name="day_{{ d }}" {{ 'checked' if d in s.work_days else '' }}>{{ d|capitalize }}</label>{% endfor %}</div>
@@ -338,8 +389,13 @@ TODAY = """{% extends "base" %}{% from "nav" import top with context %}{% from "
 TASKS = """{% extends "base" %}{% from "nav" import top with context %}{% from "pa" import flash, item_line, new_item with context %}{% block body %}
 {{ top('tasks', me, csrf, today) }}
 {{ flash(msg) }}
-<section class="card" id="new"><h2>Add a task, follow-up or anything to track</h2>{{ new_item(members, csrf, '/tasks') }}
-  <p class="sub" style="margin-top:6px">The PA checks for duplicates: if something similar is already open, you'll be taken to it instead.</p></section>
+<section class="card quickbar" id="new">
+  <form method="post" action="/tasks/quick" class="quickbar-form"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="back" value="/tasks">
+    <input name="text" required maxlength="200" placeholder="Add something… e.g. Send fee structure to Mr. Kumar by Friday" aria-label="New item" autocomplete="off">
+    <select name="kind" aria-label="Type">{% for k, v in labels.kinds.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select>
+    <button class="primary" type="submit">Add</button></form>
+  <details style="margin-top:8px"><summary>Add with owner, priority and more details</summary><div style="margin-top:10px">{{ new_item(members, csrf, '/tasks') }}</div></details>
+</section>
 <section class="card">
   <form class="filters" method="get" action="/tasks">
     <label>Type<select name="kind"><option value="">All</option>{% for k, v in labels.kinds.items() %}<option value="{{ k }}" {{ 'selected' if f.kind == k else '' }}>{{ v }}</option>{% endfor %}</select></label>
@@ -348,10 +404,15 @@ TASKS = """{% extends "base" %}{% from "nav" import top with context %}{% from "
     <label>Department<select name="department"><option value="">All</option>{% for d in labels.departments %}<option {{ 'selected' if f.department == d else '' }}>{{ d }}</option>{% endfor %}</select></label>
     <label>When<select name="when"><option value="">Any time</option>{% for k, v in [('overdue', 'Overdue'), ('today', 'Today'), ('tomorrow', 'Tomorrow'), ('this_week', 'This week'), ('later', 'Later'), ('none', 'No date')] %}<option value="{{ k }}" {{ 'selected' if f.when == k else '' }}>{{ v }}</option>{% endfor %}</select></label>
     <label>Search<input name="q" value="{{ f.q }}"></label>
-    <button type="submit">Filter</button>
+    <button type="submit">Filter</button>{% if f.kind or f.owner or f.department or f.when or f.q or f.status != 'active' %} <a href="/tasks">Clear</a>{% endif %}
   </form>
-  <h2 style="margin-top:14px">{{ items|length }} item{{ 's' if items|length != 1 }}</h2>
-  <ul class="list">{% for i in items %}{{ item_line(i, csrf, '/tasks') }}{% else %}<li class="empty">Nothing here.</li>{% endfor %}</ul>
+  <p class="meta" style="margin:10px 0 0">{{ items|length }} item{{ 's' if items|length != 1 }} · tick ✓ when done</p>
+  {% set groups = [('overdue', 'Overdue'), ('today', 'Today'), ('tomorrow', 'Tomorrow'), ('this_week', 'This week'), ('later', 'Later'), ('none', 'No date')] %}
+  {% for key, label in groups %}{% set rows = items|selectattr('bucket', 'equalto', key)|list %}{% if rows %}
+  <h3 class="group-h {{ 'over' if key == 'overdue' else '' }}">{{ label }} <span class="meta">({{ rows|length }})</span></h3>
+  <ul class="list rows">{% for i in rows %}{{ item_line(i, csrf, '/tasks') }}{% endfor %}</ul>
+  {% endif %}{% endfor %}
+  {% if not items %}<p class="empty">Nothing here. {% if f.status == 'active' and not f.q %}Add your first item above, or type it in the <strong>+ New</strong> button at the top of any page.{% endif %}</p>{% endif %}
 </section>
 <section class="card" id="team"><h2>Who owns what</h2>
   <p class="sub">A neutral view of open work, to spot overload and help early — not to blame.</p>
@@ -364,6 +425,7 @@ TASKS = """{% extends "base" %}{% from "nav" import top with context %}{% from "
 TASK = """{% extends "base" %}{% from "nav" import top with context %}{% from "pa" import flash with context %}{% block body %}
 {{ top('tasks', me, csrf, today, i.kind_label ~ ' #' ~ i.id) }}
 {{ flash(msg) }}
+<a class="backlink" href="/tasks">← All tasks</a>
 <section class="card">
   <h2>{{ i.title }}</h2>
   <div class="meta"><span class="k">{{ i.kind_label }}</span>{{ i.status }}{% if i.stage %} · {{ (labels.lead_stages if i.kind == 'lead' else labels.qa_stages).get(i.stage, i.stage) }}{% endif %}
@@ -402,8 +464,8 @@ TASK = """{% extends "base" %}{% from "nav" import top with context %}{% from "p
       <label>Status<select name="status">{% for k, v in labels.statuses.items() %}<option value="{{ k }}" {{ 'selected' if v == i.status else '' }}>{{ v }}</option>{% endfor %}</select></label>
       <label>Priority<select name="priority">{% for p in labels.priorities %}<option {{ 'selected' if p == i.priority else '' }}>{{ p }}</option>{% endfor %}</select></label>
       <label>Department<select name="department"><option value="">—</option>{% for d in labels.departments %}<option {{ 'selected' if d == i.department else '' }}>{{ d }}</option>{% endfor %}</select></label>
-      <label>New due date<input name="due" placeholder="{{ i.due or 'tomorrow 3pm' }}"></label>
-      {% if i.due %}<label class="check"><input type="checkbox" name="clear_due"> remove due date</label>{% endif %}
+      <div><label>{{ 'Change due date' if i.due else 'Due date' }} <small>{% if i.due %}(now {{ i.due }}){% endif %}</small><input name="due" placeholder="tomorrow 3pm, Friday, 12 Oct"></label>
+        {% if i.due %}<label class="check" style="margin-top:4px"><input type="checkbox" name="clear_due"> no due date</label>{% endif %}</div>
     </div>
     <div class="form-grid">
       <label>Person / contact<input name="related_person" value="{{ i.who }}" maxlength="120"></label>
@@ -650,7 +712,7 @@ SETTINGS = """{% extends "base" %}{% from "nav" import top with context %}{% fro
 {% if section == 'general' %}
   <h2>General</h2>
   <label>Company name<input name="company_name" value="{{ s.company_name }}" maxlength="60"></label>
-  <label>Timezone<input name="timezone" value="{{ s.timezone }}" placeholder="Asia/Kolkata"></label>
+  <label>Timezone <small>(pick from the list or type, e.g. Asia/Kolkata for India)</small><input name="timezone" value="{{ s.timezone }}" placeholder="Asia/Kolkata" list="tzlist" autocomplete="off"><datalist id="tzlist"><option value="Asia/Kolkata"><option value="Asia/Dubai"><option value="Asia/Riyadh"><option value="Asia/Qatar"><option value="Asia/Singapore"><option value="Asia/Kuala_Lumpur"><option value="Asia/Tokyo"><option value="Australia/Sydney"><option value="Europe/London"><option value="Europe/Berlin"><option value="Africa/Nairobi"><option value="America/New_York"><option value="America/Chicago"><option value="America/Los_Angeles"><option value="UTC"></datalist></label>
   <div class="form-grid"><label>Work starts<input name="work_start" type="time" value="{{ s.work_start }}"></label><label>Work ends<input name="work_end" type="time" value="{{ s.work_end }}"></label>
   <label>Reply promise (business hours)<input name="reply_hours" inputmode="decimal" value="{{ s.reply_hours }}"></label></div>
   <div class="days">{% for d in ['mon','tue','wed','thu','fri','sat','sun'] %}<label class="check"><input type="checkbox" name="day_{{ d }}" {{ 'checked' if d in s.work_days else '' }}>{{ d|capitalize }}</label>{% endfor %}</div>
@@ -705,10 +767,19 @@ expect-url /live">{{ qa_cfg.workflows }}</textarea>
 {% endblock %}"""
 
 
+ERROR = """{% extends "base" %}{% from "nav" import brand_logo, brand_wordmark with context %}{% block body %}
+<div class="card login">
+  <div class="brand" style="margin-bottom:12px">{{ brand_logo() }}<div><div class="brand-name">{{ brand_wordmark() }}</div></div></div>
+  <p style="text-align:center">{{ message }}</p>
+  <div class="actions" style="justify-content:center"><a class="btn" href="/">Go to the dashboard</a><a class="btn" href="/login">Sign in</a></div>
+</div>
+{% endblock %}"""
+
+
 def register(env) -> None:
     m = env.loader.mapping
     m["base"] = m["base"].replace("</style>", PA_CSS + "</style>", 1) if PA_CSS not in m["base"] else m["base"]
     m.update({"pa": PA_MACROS, "forms": FORM_MACROS, "setup": SETUP,
               "today": TODAY, "tasks": TASKS, "task": TASK, "business": BUSINESS, "communications": COMMUNICATIONS,
               "qa": QA, "quality": QUALITY, "reports": REPORTS, "report": REPORT, "assistant": ASSISTANT,
-              "search": SEARCH, "settings": SETTINGS})
+              "search": SEARCH, "settings": SETTINGS, "error": ERROR})

@@ -1,3 +1,3 @@
-"""NeuraNova operations agent."""
+"""NeuraNova PA: personal assistant for business growth, operations, communication, quality and progress."""
 
-__version__ = "0.1.0"
+__version__ = "1.1.0"

@@ -120,6 +120,10 @@ def mount_dashboard(app: FastAPI, settings: Settings, agent_factory: Callable, s
                             headers={"Cache-Control": "no-store", "X-Frame-Options": "DENY",
                                      "Referrer-Policy": "no-referrer"})
 
+    def oops(message: str, code: int = 403) -> HTMLResponse:
+        """A friendly page instead of bare text when something isn't allowed or a session ran out."""
+        return page("error", code, message=message)
+
     def back(path: str = "/", msg: str = "") -> RedirectResponse:
         # Same-site paths only: "//evil" and "/\\evil" are treated as other sites by browsers.
         path = path if path.startswith("/") and path[1:2] not in ("/", "\\") else "/"
@@ -133,9 +137,9 @@ def mount_dashboard(app: FastAPI, settings: Settings, agent_factory: Callable, s
         agent = agent_factory()
         user, cookie = current(request, agent)
         if not user or not hmac.compare_digest(csrf or "", sessions.csrf(cookie)):
-            return Response("Session expired - reload the page and sign in again.", status_code=403)
+            return oops("Your session ran out (or the page was open too long). Sign in again and repeat the last step.")
         if admin and user["role"] != "admin":
-            return Response("Admins only.", status_code=403)
+            return oops("Admins only.")
         return agent, user
 
     def today_text() -> str:
@@ -245,7 +249,7 @@ def mount_dashboard(app: FastAPI, settings: Settings, agent_factory: Callable, s
             members=store.users(),
             my_tasks=[task_view(t, me, now) for t in store.team_tasks("open", assignee_id=me["id"])],
             kinds=EVENT_KINDS, events=store.recent_events(15),
-            drafts=[], waiting=[], tasks=[], tasks_error="", activity=[], setup=None, b=None, setup_done=True,
+            drafts=[], waiting=[], tasks=[], tasks_error="", activity=[], setup=None, b=None, setup_done=True, checklist=[],
         )
         try:
             ctx["b"] = agent.briefing(user_name=me["name"]) if is_owner else None
@@ -255,7 +259,23 @@ def mount_dashboard(app: FastAPI, settings: Settings, agent_factory: Callable, s
             from .pa import prefs
             ctx["setup_done"] = prefs.get(store)["setup_done"]
         if is_owner and sessions:
-            ctx["setup"] = integ.summary(integ.view(settings, store, public_url or str(request.base_url)))
+            cards = integ.view(settings, store, public_url or str(request.base_url))
+            ctx["setup"] = integ.summary(cards)
+            ok = {c["name"] for c in cards if c["status"] == "connected"}
+            qa_cfg = integ.qa_config(settings, store)
+            steps = [
+                ("Connect your email", bool(ok & {"email", "gmail", "outlook"}), "/integrations#email",
+                 "So the PA can read and sort your inbox"),
+                ("Connect AI (Claude or OpenAI)", bool(ok & {"claude", "openai"}), "/settings?section=ai",
+                 "Reads messages, drafts replies, writes reports"),
+                ("Connect WhatsApp", "whatsapp" in ok, "/integrations#whatsapp", "Alerts and chat on your phone"),
+                ("Add your calendar", "calendar" in ok, "/integrations#calendar", "Meeting prep and follow-ups"),
+                ("Add your NeuraNova app addresses", bool(qa_cfg["production"] or qa_cfg["development"]),
+                 "/settings?section=apps", "Automatic checks of your applications"),
+                ("Invite a teammate", len(store.users()) > 1, "/team#people", "Share tasks and follow-ups"),
+                ("Add your first task", bool(agent.pa.items(status=None, limit=1)), "/tasks#new", "Or press N on any page"),
+            ]
+            ctx["checklist"] = [{"title": t, "done": d, "href": h, "why": y} for t, d, h, y in steps]
         if is_owner:
             for d in store.pending_drafts():
                 ctx["drafts"].append({"id": d["id"], "to": sender_name(d["sender"]), "subject": d["subject"],
@@ -289,7 +309,7 @@ def mount_dashboard(app: FastAPI, settings: Settings, agent_factory: Callable, s
             return g
         agent, me = g
         if me["id"] != settings.owner_id:
-            return Response("Only the founder can act on reply drafts.", status_code=403)
+            return oops("Only the founder can act on reply drafts.")
         return back("/#drafts", action(agent))
 
     @app.post("/drafts/{draft_id}/edit")
@@ -520,9 +540,9 @@ def mount_dashboard(app: FastAPI, settings: Settings, agent_factory: Callable, s
         if not user:
             return RedirectResponse("/login", status_code=303)
         if user["id"] != settings.owner_id:
-            return Response("Only the founder can manage integrations.", status_code=403)
+            return oops("Only the founder can manage integrations.")
         if csrf is not None and not hmac.compare_digest(csrf or "", sessions.csrf(cookie)):
-            return Response("Session expired - reload the page and sign in again.", status_code=403)
+            return oops("Your session ran out (or the page was open too long). Sign in again and repeat the last step.")
         return agent, user
 
     @app.get("/integrations")
@@ -696,4 +716,4 @@ def mount_dashboard(app: FastAPI, settings: Settings, agent_factory: Callable, s
     from .pa_web import mount_pa
     mount_pa(app, SimpleNamespace(settings=settings, agent_factory=agent_factory, store=store, current=current,
                                   page=page, back=back, guarded=guarded, founder=founder, today_text=today_text,
-                                  sessions=sessions, base_url=base_url))
+                                  sessions=sessions, base_url=base_url, oops=oops))

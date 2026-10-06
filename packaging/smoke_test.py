@@ -42,7 +42,7 @@ def main(exe: str) -> int:
                                          "password2": PASSWORD, "tz": "Asia/Kolkata"}, timeout=30)
         assert "Starting NeuraNova PA" in r.text, r.text[:300]
         time.sleep(3)
-        assert wait_for(BASE + "/health", 120).json() == {"ok": True}
+        assert wait_for(BASE + "/health", 120).json()["ok"] is True
         with httpx.Client(base_url=BASE, timeout=60) as c:
             r = c.post("/login", data={"email": "founder@neuranova.in", "password": PASSWORD})
             assert r.status_code == 303 and r.headers["location"] == "/setup", (r.status_code, r.headers)

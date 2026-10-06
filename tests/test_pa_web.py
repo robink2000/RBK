@@ -36,7 +36,7 @@ def test_all_pages_render(tmp_path):
     for path in PAGES:
         resp = client.get(path)
         assert resp.status_code == 200, path
-        assert "Safe Mode on" in resp.text, path
+        assert "🛡 Safe Mode" in resp.text, path
     for s in SECTIONS:
         assert client.get(f"/settings?section={s}").status_code == 200, s
     home = client.get("/").text
@@ -90,7 +90,7 @@ def test_safe_mode_needs_typed_confirmation(tmp_path):
     assert prefs.safe_mode(agent.store)
     client.post("/settings/security", data={"csrf": token, "confirm": "TURN OFF"})
     assert not prefs.safe_mode(agent.store)
-    assert "Safe Mode on" not in client.get("/today").text
+    assert "🛡 Safe Mode" not in client.get("/today").text
     client.post("/settings/security", data={"csrf": token, "safe_mode": "on"})
     assert prefs.safe_mode(agent.store)
 
@@ -152,3 +152,53 @@ def test_member_sees_no_founder_pages(tmp_path):
     for path in ["/communications", "/reports", "/settings", "/setup"]:
         assert client.get(path).status_code == 403, path
     assert "Communications" not in client.get("/today").text
+
+
+def test_quick_add_understands_dates_and_snooze(tmp_path):
+    client, agent, _, _ = signed_in(tmp_path)
+    token = csrf_of(client.get("/tasks").text)
+    r = client.post("/tasks/quick", data={"csrf": token, "text": "Call Ravi's parents tomorrow 3pm", "kind": "task"},
+                    headers={"referer": "http://testserver/today"}, follow_redirects=False)
+    assert r.headers["location"].startswith("/today?msg=Added")              # back where you were
+    [item] = agent.pa.items(kind="task")
+    assert item["due_at"] and item["owner_id"] == agent.settings.owner_id
+    r = client.post("/tasks/quick", data={"csrf": token, "text": "Call Ravi's parents tomorrow 3pm"}, follow_redirects=False)
+    assert r.headers["location"].startswith(f"/tasks/{item['id']}")         # not added twice
+    client.post("/tasks/quick", data={"csrf": token, "text": "Pay the hosting bill today"})
+    [today_item] = [r for r in agent.pa.items(kind="task") if r["id"] != item["id"]]
+    before = today_item["due_at"]
+    assert before
+    client.post(f"/tasks/{today_item['id']}", data={"csrf": token, "action": "snooze"})
+    assert agent.pa.item(today_item["id"])["due_at"] > before
+    item = today_item
+    page = client.get(f"/tasks/{item['id']}").text
+    assert "Added as Task" in page and "Moved to tomorrow" in page and "Due →" in page
+    tasks = client.get("/tasks").text
+    assert "Tomorrow" in tasks and 'class="tick"' in tasks
+
+
+def test_friendly_errors_and_checklist(tmp_path):
+    client, agent, _, _ = signed_in(tmp_path)
+    r = client.post("/tasks/quick", data={"csrf": "forged", "text": "x"})
+    assert r.status_code == 403 and "session ran out" in r.text and "<html" in r.text
+    from neuranova.pa import prefs
+    prefs.save(agent.store, {"setup_done": True})
+    home = client.get("/").text
+    assert "Getting started" in home and "Connect your email" in home
+    health = client.get("/health").json()
+    assert health["ok"] and health["app"] == "neuranova-pa" and health["version"]
+
+
+def test_launcher_reads_running_version(monkeypatch):
+    from neuranova import launcher
+
+    class Resp:
+        def __init__(self, data): self.data = data
+        def json(self): return self.data
+    import httpx
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: Resp({"ok": True, "app": "neuranova-pa", "version": "9.9"}))
+    assert launcher.running_version(1) == "9.9"
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: Resp({"ok": True}))
+    assert launcher.running_version(1) == ""                                  # an older NeuraNova
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: (_ for _ in ()).throw(httpx.ConnectError("no")))
+    assert launcher.running_version(1) is None                               # something else
