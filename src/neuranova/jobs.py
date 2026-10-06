@@ -77,8 +77,7 @@ class Agent:
         self.store.close_drafts_for_replied()
         if self.settings.instant_high_priority:
             self.alert_high_priority()
-        if self.settings.auto_create_tasks and self.todoist:
-            stats["tasks"] = self.create_tasks()
+        stats["pa"] = self.analyze_communications()
         if self.settings.drafts_enabled:
             stats["drafts"] = self.draft_replies()
         self.store.log("check_inbox", **stats)
@@ -117,6 +116,207 @@ class Agent:
                 self.notifier.send("\n".join(lines))
                 self.store.log("alert_high_priority", email_id=r["id"])
             self.store.mark_alerted(r["id"])
+
+    # --- PA: understand communication and keep work items current ------------------------
+
+    @property
+    def pa(self):
+        return self.store.pa
+
+    def _find_owner(self, hint: str):
+        from .team import find_member
+        return find_member(self.store, hint)
+
+    def analyze_communications(self, limit: int = 10) -> int:
+        """Run the PA's analysis on new important emails and WhatsApp messages from contacts."""
+        from .brain import goals_text
+        from .pa.comms import Incoming, process_message
+
+        llm = getattr(self.brain, "llm", None)
+        if llm is None or not hasattr(llm, "json"):
+            return 0
+        team = [u["name"] for u in self.store.users()]
+        goals = goals_text(self.settings.goals)
+        done = 0
+        for r in self.store.emails_for_pa(limit):
+            conn = self.connector(r["source"])
+            body = r["snippet"]
+            try:
+                if conn is not None:
+                    body = conn.fetch_body(r["external_id"]) or body
+            except Exception:
+                log.warning("Could not fetch the full email %s; using the preview", r["id"])
+            from email.utils import parseaddr
+            name, addr = parseaddr(r["sender"])
+            contact_id = self.pa.contact_for(name=name, email=addr)
+            msg = Incoming("email", str(r["id"]), r["sender"], r["subject"], body, row_dt(r["received_at"]),
+                           contact_id=contact_id, link=r["link"])
+            try:
+                out = process_message(llm, self.pa, msg, goals=goals, tz=self.settings.tz,
+                                      end_of_day=self.settings.working_hours.end, team=team,
+                                      find_owner=self._find_owner)
+            except Exception:
+                log.exception("PA analysis failed for email %s", r["id"])
+                continue
+            self.store.mark_email_pa(r["id"])
+            self.store.log("pa_analyzed", channel="email", ref=r["id"], changes=out.applied)
+            done += 1
+        for m in self.pa.unanalyzed_messages(limit):
+            text = (m["body"] or "").strip()
+            if len(text) < 4 or not any(ch.isalnum() for ch in text):
+                self.pa.mark_analyzed(m["id"], text, "none")  # "ok", emoji: nothing to track
+                continue
+            msg = Incoming(m["channel"], str(m["id"]), m["contact_name"] or m["sender"], m["subject"], text,
+                           row_dt(m["at"]), contact_id=m["contact_id"])
+            try:
+                out = process_message(llm, self.pa, msg, goals=goals, tz=self.settings.tz,
+                                      end_of_day=self.settings.working_hours.end, team=team,
+                                      find_owner=self._find_owner)
+            except Exception:
+                log.exception("PA analysis failed for message %s", m["id"])
+                continue
+            self.pa.mark_analyzed(m["id"], out.summary, out.importance)
+            self.store.log("pa_analyzed", channel=m["channel"], ref=m["id"], changes=out.applied)
+            done += 1
+        return done
+
+    # --- outgoing messages (Safe Mode: they wait for approval) ---------------------------
+
+    def compose(self, channel: str, recipient: str, purpose: str, by_user: str, recipient_name: str = "",
+                item_id: int | None = None, subject: str = "") -> int:
+        """Draft a WhatsApp or email message with the AI and put it in the approvals outbox."""
+        from .pa.writing import draft_message
+
+        llm = getattr(self.brain, "llm", None)
+        body, subject = draft_message(llm, channel, recipient_name or recipient, purpose,
+                                      signature=self.settings.reply_signature, tone=self.settings.reply_tone,
+                                      company=self.settings.brand.get("name", "NeuraNova"), subject=subject)
+        outbox_id = self.pa.add_outbox(channel, recipient, body, by_user, recipient_name=recipient_name,
+                                       subject=subject, reason=purpose[:300], item_id=item_id)
+        self.store.log("outbox_drafted", outbox=outbox_id, channel=channel, by=by_user)
+        return outbox_id
+
+    def send_outbox(self, outbox_id: int, by_user: str, body: str | None = None) -> str:
+        """Send an approved message. Returns a plain result for the founder."""
+        o = self.pa.outbox_item(outbox_id)
+        if o is None:
+            return f"No message #{outbox_id}."
+        if o["status"] != "pending":
+            return f"Message #{outbox_id} is already {o['status']}."
+        if body is not None and body.strip() and body.strip() != o["body"]:
+            self.pa.conn.execute("UPDATE outbox SET body = ? WHERE id = ?", (body.strip(), outbox_id))
+            self.pa.conn.commit()
+            o = self.pa.outbox_item(outbox_id)
+        if not self.pa.transition_outbox(outbox_id, "pending", "sending", by=by_user):
+            return f"Message #{outbox_id} is already being handled."
+        try:
+            if o["channel"] == "whatsapp":
+                if not self.notifier_factory:
+                    raise RuntimeError("WhatsApp isn't connected")
+                self.notifier_factory(o["recipient"]).send(o["body"])
+                contact = self.pa.contact_for(phone=o["recipient"], name=o["recipient_name"])
+                self.pa.add_message("whatsapp", "out", f"outbox-{outbox_id}", o["body"], self._now(),
+                                    recipient=o["recipient"], contact_id=contact)
+                self.pa.mark_thread_replied("whatsapp", contact, self._now())
+            else:
+                conn = next((c for c in self.mail if hasattr(c, "send_new")), None)
+                if conn is None:
+                    raise RuntimeError("No email account is connected")
+                conn.send_new(o["recipient"], o["subject"] or "Follow-up", o["body"])
+        except Exception as exc:
+            log.exception("Sending outbox %s failed", outbox_id)
+            self.pa.transition_outbox(outbox_id, "sending", "pending", by=by_user, error=str(exc)[:300])
+            return f"❌ Couldn't send message #{outbox_id}: {str(exc)[:160]}. It's still waiting in Approvals."
+        self.pa.transition_outbox(outbox_id, "sending", "sent", by=by_user)
+        if o["item_id"]:
+            self.pa.update_item(o["item_id"], by_user, note=f"{o['channel'].capitalize()} sent to {o['recipient_name'] or o['recipient']}",
+                                follow_up_at=self._now() + timedelta(days=1))
+        self.store.log("outbox_sent", outbox=outbox_id, channel=o["channel"], by=by_user)
+        return f"✅ Sent to {o['recipient_name'] or o['recipient']}."
+
+    def reject_outbox(self, outbox_id: int, by_user: str) -> str:
+        if self.pa.transition_outbox(outbox_id, "pending", "rejected", by=by_user):
+            self.store.log("outbox_rejected", outbox=outbox_id, by=by_user)
+            return f"Message #{outbox_id} discarded."
+        return f"Message #{outbox_id} is not waiting for approval."
+
+    def draft_followups(self) -> int:
+        """Overdue promises with a reachable contact get a polite follow-up draft (once per expected date).
+        Sent straight away only if Safe Mode is off and follow-ups are trusted."""
+        from .pa import prefs
+
+        if not prefs.get(self.store)["auto_draft_followups"]:
+            return 0
+        now = self._now()
+        made = 0
+        for row in self.pa.items(kind="waiting", status="active", limit=500):
+            due = row_dt(row["due_at"]) if row["due_at"] else None
+            if not due or due > now or not row["contact_id"]:
+                continue
+            key = f"followup:{row['id']}:{row['due_at']}"
+            if self.store.reminder_sent_check(key):
+                continue
+            contact = self.pa.contact(row["contact_id"])
+            channel, recipient = ("whatsapp", contact["phone"]) if contact["phone"] else ("email", contact["email"])
+            if not recipient:
+                continue
+            purpose = (f"Politely follow up on: {row['title']}. It was expected by "
+                       f"{due.astimezone(self.settings.tz):%A %d %B, %H:%M}. Ask them to share it, or an updated "
+                       f"time, today.")
+            outbox_id = self.compose(channel, recipient, purpose, "PA", recipient_name=contact["name"],
+                                     item_id=row["id"], subject=f"Follow-up: {row['title'][:60]}")
+            self.store.reminder_sent(key, "pa")
+            made += 1
+            if prefs.may_send_automatically(self.store, "followups"):
+                self.send_outbox(outbox_id, "PA (trusted automation)")
+        return made
+
+    def proactive(self) -> dict:
+        """Tell the founder what needs attention (digest, no repeats, no spam)."""
+        from .pa import prefs, proactive
+        drafted = self.draft_followups()
+        if not prefs.get(self.store)["notify_digest"]:
+            return {"sent": 0, "drafted": drafted}
+        return {**proactive.run(self.store, self.settings, self.notifier.send), "drafted": drafted}
+
+    def run_qa(self, environment: str) -> dict:
+        """Run the application checks for one environment, record issues, alert on Production problems."""
+        from pathlib import Path
+
+        from .integrations import qa_config
+        from .pa import qa
+
+        cfg = qa_config(self.settings, self.store)
+        base = cfg.get(environment)
+        if not base:
+            return {"skipped": f"No {qa.ENVIRONMENTS[environment]} address set"}
+        run_id = self.pa.start_qa_run(environment)
+        evidence = Path(self.settings.db_path).parent / "qa" / f"run-{run_id}" if str(self.settings.db_path) != ":memory:" \
+            else Path("data/qa") / f"run-{run_id}"
+        try:
+            results = qa.run_environment(environment, base, cfg["accounts"].get(environment, {}),
+                                         qa.parse_workflows(cfg["workflows"]), evidence,
+                                         login_path=cfg["login_path"], allow_prod_login=cfg["allow_prod_login"])
+        except Exception as exc:
+            log.exception("QA run failed to start")
+            self.pa.finish_qa_run(run_id, "error", str(exc)[:300], [])
+            return {"error": str(exc)}
+        counts = qa.record(self.pa, results)
+        failed = [r for r in results if not r.ok]
+        self.pa.finish_qa_run(run_id, "failed" if failed else "passed", qa.summary_text(results, counts),
+                              qa.results_json(results))
+        self.store.log("qa_run", environment=environment, **counts)
+        if environment == "production" and (counts["new"] or counts["regressions"]) and self._notify_on("qa"):
+            lines = [f"🚨 NeuraNova Production: {len(failed)} check(s) failing"]
+            lines += [f"- {r.role} · {r.workflow}: {r.error[:120]}" for r in failed[:5]]
+            self.notifier.send("\n".join(lines), teaser=f"NeuraNova Production: {len(failed)} check(s) failing.")
+        return {"run_id": run_id, "passed": len(results) - len(failed), "failed": len(failed), **counts}
+
+    def briefing(self, meetings: list | None = None, user_name: str = "") -> dict:
+        from .pa import briefing
+        if meetings is None:
+            meetings = self.meetings()["today"]
+        return briefing.build(self.store, self.settings, meetings=meetings, user_name=user_name)
 
     # --- email -> Todoist ----------------------------------------------------
 
@@ -281,7 +481,7 @@ class Agent:
         task = self._task_for_change(by_user, task_id)
         if task["status"] == "done":
             return f"#{task_id} is already done."
-        self.store.update_team_task(task_id, status="done", done_at=self._now(), blocked_reason="")
+        self.store.update_team_task(task_id, actor=by_user["id"], status="done", done_at=self._now(), blocked_reason="")
         self.store.log("team_task_done", by=by_user["id"], task_id=task_id)
         creator = self.store.user(task["created_by"])
         if creator and creator["id"] != by_user["id"]:
@@ -292,7 +492,7 @@ class Agent:
         task = self._task_for_change(by_user, task_id)
         if not reason.strip():
             raise TeamError("Say what's blocking it, e.g. 'blocked 12 waiting for client logo'.")
-        self.store.update_team_task(task_id, status="blocked", blocked_reason=reason.strip()[:300])
+        self.store.update_team_task(task_id, actor=by_user["id"], status="blocked", blocked_reason=reason.strip()[:300])
         self.store.log("team_task_blocked", by=by_user["id"], task_id=task_id, reason=reason[:200])
         msg = f"🚧 {by_user['name']} is blocked on #{task_id} {task['title']}\nReason: {reason.strip()}"
         self.notify_admins(msg, except_id=by_user["id"])
@@ -303,13 +503,14 @@ class Agent:
 
     def reopen_team_task(self, by_user, task_id: int) -> str:
         self._task_for_change(by_user, task_id)
-        self.store.update_team_task(task_id, status="open", blocked_reason="", done_at=None)
+        self.store.update_team_task(task_id, actor=by_user["id"], status="open", blocked_reason="", done_at=None)
         self.store.log("team_task_reopened", by=by_user["id"], task_id=task_id)
         return f"Reopened #{task_id}."
 
     def reassign_team_task(self, by_user, task_id: int, assignee) -> str:
         task = self._task_for_change(by_user, task_id)
-        self.store.update_team_task(task_id, assignee_id=assignee["id"], reminded=0, overdue_alerted=0)
+        self.store.update_team_task(task_id, actor=by_user["id"], assignee_id=assignee["id"], reminded=0,
+                                    overdue_alerted=0)
         self.store.log("team_task_reassigned", by=by_user["id"], task_id=task_id, to=assignee["id"])
         if assignee["id"] != by_user["id"]:
             self.notify_user(assignee, f"📌 {by_user['name']} handed you #{task_id} {task['title']}",
@@ -445,27 +646,70 @@ class Agent:
             ][:15],
         }
 
+    # --- calendar and reports ------------------------------------------------------------
+
+    def meetings(self, force: bool = False) -> dict:
+        from .integrations import calendar_urls
+        from .pa.calendar import cached_events, meetings_view
+
+        try:
+            events = cached_events(self.store, self.settings, calendar_urls(self.settings, self.store), force=force)
+        except Exception:
+            log.exception("Calendar unavailable")
+            events = []
+        return meetings_view(self.pa, events, self.settings.tz)
+
+    def report(self, kind: str, deliver: bool = False) -> dict:
+        """Write a report (AI text when available, plain text otherwise), save it, optionally send it."""
+        from .brain import goals_text
+        from .pa import reports
+
+        out = reports.generate(kind, self.store, self.settings, llm=getattr(self.brain, "llm", None),
+                               goals=goals_text(self.settings.goals), meetings=self.meetings())
+        if deliver:
+            self.notifier.send(out["text"], teaser=f"Your {reports.TITLES[kind]} is ready. Open NeuraNova PA → Reports.")
+        self._save_to_drive(out)
+        return out
+
+    def _save_to_drive(self, out: dict) -> None:
+        from .integrations import save_values, with_integrations
+
+        merged = with_integrations(self.settings, self.store)
+        token = merged.secret("GDRIVE_TOKEN_JSON")
+        if not token:
+            return
+        try:
+            from .pa.drive import upload_report
+            link, folder = upload_report(token, out["title"], out["text"], self.store.get("drive_folder_id") or "",
+                                         on_refresh=lambda t: save_values(self.store, self.settings, "drive",
+                                                                          {"GDRIVE_TOKEN_JSON": t}, "agent"))
+            self.store.put("drive_folder_id", folder)
+            self.store.log("report_saved_to_drive", title=out["title"], link=link)
+        except Exception:
+            log.exception("Could not save the report to Google Drive")
+
     def weekly_report(self) -> str:
-        facts = {
-            "this_week": compute_progress(self.store, self.settings.tz, days=7),
-            "last_30_days": compute_progress(self.store, self.settings.tz, days=30),
-            "by_week": weekly_series(self.store, self.settings.tz, weeks=8),
-            "recent_events": [dict(e) for e in self.store.recent_events(20)],
-            "team_last_7_days": team_stats(self.store, days=7),
-            "team_blocked_now": [format_task(t, self.settings.tz) + f" ({t['blocked_reason']})"
-                                 for t in self.store.team_tasks("open") if t["status"] == "blocked"],
-        }
-        text = self.brain.write_weekly(facts)
-        self.notifier.send(text, teaser="Your weekly NeuraNova progress report is ready. Reply 'report' to read it.")
-        self.store.put("last_weekly_report", text)
-        self.store.log("weekly_report", chars=len(text))
-        return text
+        out = self.report("weekly", deliver=self._notify_on("weekly"))
+        for kind in ("sales", "quality", "qa"):  # saved for the Reports page, not sent (no spam)
+            try:
+                self.report(kind)
+            except Exception:
+                log.exception("Could not write the %s report", kind)
+        self.store.put("last_weekly_report", out["text"])
+        return out["text"]
+
+    def _notify_on(self, kind: str) -> bool:
+        from .pa import prefs
+        return bool(prefs.get(self.store).get(f"notify_{kind}", True))
 
     def morning_brief(self) -> str:
         self.check_inbox()
-        facts = self.gather_brief_facts()
-        text = self.brain.write_brief(facts)
-        self.notifier.send(text)
+        out = self.report("morning", deliver=self._notify_on("morning"))
         self.store.put("last_brief", self._now().isoformat())
-        self.store.log("morning_brief", chars=len(text))
-        return text
+        return out["text"]
+
+    def eod_summary(self) -> str:
+        return self.report("eod", deliver=self._notify_on("eod"))["text"]
+
+    def monthly_report(self) -> str:
+        return self.report("monthly", deliver=self._notify_on("monthly"))["text"]

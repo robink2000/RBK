@@ -35,6 +35,11 @@ def hash_password(password: str) -> str:
     return f"scrypt${salt.hex()}${digest.hex()}"
 
 
+def is_password_hash(value: str) -> bool:
+    parts = value.split("$")
+    return len(parts) == 3 and parts[0] == "scrypt" and len(parts[1]) == 32 and len(parts[2]) == 64
+
+
 def verify_password(password: str, stored: str) -> bool:
     try:
         scheme, salt_hex, digest_hex = stored.split("$")
@@ -76,7 +81,10 @@ def ensure_owner(store: Store, settings) -> None:
     # Skip the (deliberately slow) scrypt check when the env password hasn't changed.
     fingerprint = hashlib.sha256(("owner-pw:" + password).encode()).hexdigest() if password else ""
     if password and not (existing and store.get("owner_pw_fp") == fingerprint):
-        if not (existing and verify_password(password, existing["password_hash"])):
+        if is_password_hash(password):
+            # setup stores only a scrypt hash in .env, never the password itself
+            new_hash = password if not existing or existing["password_hash"] != password else None
+        elif not (existing and verify_password(password, existing["password_hash"])):
             new_hash = hash_password(password)
         store.put("owner_pw_fp", fingerprint)
     store.upsert_user(
@@ -185,11 +193,14 @@ def parse_due(value: str | None, tz, end_of_day: time) -> datetime | None:
 
 
 def can_change(user, task) -> bool:
-    return user["role"] == "admin" or user["id"] in (task["assignee_id"], task["created_by"])
+    owner = task["owner_id"] if "owner_id" in task.keys() else task["assignee_id"]
+    return user["role"] == "admin" or user["id"] in (owner, task["created_by"])
 
 
 def format_task(task, tz) -> str:
     due = row_dt(task["due_at"])
     when = f" · due {due.astimezone(tz).strftime('%a %d %b %H:%M')}" if due else ""
     flag = " · BLOCKED" if task["status"] == "blocked" else ""
-    return f"#{task['id']} {task['title']} → {task['assignee_name']}{when}{flag}"
+    keys = task.keys()
+    who = (task["owner_name"] if "owner_name" in keys else task["assignee_name"]) or "Unassigned"
+    return f"#{task['id']} {task['title']} → {who}{when}{flag}"

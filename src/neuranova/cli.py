@@ -27,6 +27,8 @@ def build_agent(settings: Settings):
     store = Store(settings.db_path, settings.workspace_id, settings.owner_id)
     base_settings = settings
     settings = with_integrations(settings, store)  # keys and sign-ins connected in the console
+    from .pa import prefs
+    settings = prefs.apply(settings, store)        # company, hours and schedules set in Settings
     ensure_owner(store, settings)
 
     mail = []
@@ -61,14 +63,13 @@ def build_agent(settings: Settings):
         except Exception as exc:
             log.warning("Outlook disabled: %s", exc)
 
-    import anthropic
+    from .ai import build_llm
 
     todoist_token = settings.secret("TODOIST_API_TOKEN")
-    api_key = settings.secret("ANTHROPIC_API_KEY")
     return Agent(
         settings=settings,
         store=store,
-        brain=Brain(settings.model, settings.goals, client=anthropic.Anthropic(api_key=api_key or None),
+        brain=Brain(settings.model, settings.goals, llm=build_llm(settings),
                     tone=settings.reply_tone, signature=settings.reply_signature),
         notifier=build_notifier(settings, store),
         mail=mail,
@@ -83,7 +84,10 @@ def run_forever(settings: Settings) -> None:
 
     from .db import Store
     from .integrations import with_integrations
-    settings_now = with_integrations(settings, Store(settings.db_path, settings.workspace_id, settings.owner_id))
+    from .pa import prefs
+    _store = Store(settings.db_path, settings.workspace_id, settings.owner_id)
+    settings = prefs.apply(settings, _store)       # schedule times set in Settings
+    settings_now = with_integrations(settings, _store)
     webhook = bool(settings_now.secret("WHATSAPP_VERIFY_TOKEN"))
     if webhook and not settings_now.secret("WHATSAPP_APP_SECRET"):
         raise SystemExit("WHATSAPP_APP_SECRET is required when the webhook is enabled (see docs/SETUP.md)")
@@ -108,6 +112,23 @@ def run_forever(settings: Settings) -> None:
                   max_instances=1, coalesce=True)
     sched.add_job(job("task_reminders"), "interval", minutes=settings.task_reminder_minutes, id="tasks",
                   max_instances=1, coalesce=True)
+    def qa(environment):
+        def run():
+            try:
+                agent = build_agent(settings)
+                from .integrations import qa_config
+                if qa_config(settings, agent.store).get(environment):
+                    agent.run_qa(environment)
+            except Exception:
+                log.exception("QA %s failed", environment)
+        return run
+
+    sched.add_job(qa("production"), "cron", minute=20, hour=f"{settings.working_hours.start.hour}-"
+                  f"{max(settings.working_hours.end.hour - 1, settings.working_hours.start.hour)}",
+                  id="qa_prod", max_instances=1, coalesce=True)
+    sched.add_job(qa("development"), "cron", hour=7, minute=30, id="qa_dev", max_instances=1, coalesce=True)
+    sched.add_job(job("proactive"), "interval", minutes=settings.sla_check_minutes, id="proactive",
+                  max_instances=1, coalesce=True)
     sched.add_job(job("team_reminders"), "interval", minutes=settings.task_reminder_minutes, id="team",
                   max_instances=1, coalesce=True)
     def integrations_health():
@@ -122,6 +143,13 @@ def run_forever(settings: Settings) -> None:
                   id="integrations", max_instances=1, coalesce=True)
     sched.add_job(job("morning_brief"), "cron", hour=settings.morning_brief.hour,
                   minute=settings.morning_brief.minute, id="brief", max_instances=1, coalesce=True)
+    sched.add_job(job("eod_summary"), "cron", day_of_week=",".join(
+        ["mon", "tue", "wed", "thu", "fri", "sat", "sun"][d] for d in sorted(settings.working_hours.days)),
+        hour=settings.working_hours.end.hour, minute=settings.working_hours.end.minute, id="eod",
+        max_instances=1, coalesce=True)
+    sched.add_job(job("monthly_report"), "cron", day=1, hour=settings.weekly_report_time.hour,
+                  minute=settings.weekly_report_time.minute + 10 if settings.weekly_report_time.minute < 50 else 0,
+                  id="monthly", max_instances=1, coalesce=True)
     sched.add_job(job("weekly_report"), "cron", day_of_week=settings.weekly_report_day,
                   hour=settings.weekly_report_time.hour, minute=settings.weekly_report_time.minute,
                   id="weekly", max_instances=1, coalesce=True)
@@ -155,6 +183,10 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("reminders", help="send due task reminders now")
     sub.add_parser("brief", help="build and send the morning brief now")
     sub.add_parser("weekly", help="build and send the weekly progress report now")
+    rep = sub.add_parser("report", help="write a report now and print it")
+    rep.add_argument("kind", choices=["morning", "eod", "weekly", "monthly", "sales", "quality", "qa"])
+    qa_cmd = sub.add_parser("qa", help="run the application checks now")
+    qa_cmd.add_argument("environment", choices=["production", "development"])
     sub.add_parser("progress", help="print goal progress numbers (no Claude call, nothing sent)")
     sub.add_parser("facts", help="print the data the brief is built from (no Claude call, nothing sent)")
     sub.add_parser("test-notify", help="send a test message on the configured channel")
@@ -211,6 +243,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "run":
+        from dotenv import find_dotenv
+        from .setup_wizard import protect_env
+        if (found := find_dotenv(usecwd=True)) and protect_env(Path(found)):
+            log.info("Your console password in .env is now stored as a secure hash (the password itself is unchanged).")
         run_forever(settings)
         return 0
 
@@ -223,6 +259,10 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"sent": agent.task_reminders()}))
     elif args.command == "brief":
         agent.morning_brief()
+    elif args.command == "report":
+        print(agent.report(args.kind)["text"])
+    elif args.command == "qa":
+        print(json.dumps(agent.run_qa(args.environment), indent=2))
     elif args.command == "weekly":
         agent.weekly_report()
     elif args.command == "progress":

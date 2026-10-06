@@ -152,7 +152,69 @@ def build_demo(db_path: Path, config_path: str | None = None, fresh: bool = True
                                                           "member"), "priya-demo-pass"))
     agent.assign_team_task(owner, priya, "Send banner drafts to Acme", now + timedelta(days=1, hours=2))
     agent.assign_team_task(owner, owner, "Prepare Q4 pitch deck", now + timedelta(days=2))
+    seed_pa(store, settings, owner, priya, now)
     return settings, store, agent
+
+
+def seed_pa(store, settings, owner, priya, now) -> None:
+    """Sample PA data: leads, promises, application issues, quality concerns, WhatsApp, approvals."""
+    from .pa import prefs
+
+    pa = store.pa
+    me, p = owner["id"], priya["id"]
+    sharma = pa.contact_for("Mrs. Sharma (sample)", phone="919800000001", role="parent")
+    kumar = pa.contact_for("Mr. Kumar (sample)", phone="919800000002", role="parent")
+    rahul = pa.contact_for("Rahul - developer (sample)", phone="919800000003", role="developer")
+    for title, stage, value, days, contact, prio in [
+        ("Sharma family - Grade 6 admission", "demo_pending", 45000, 1, sharma, "high"),
+        ("Kumar - two children, Grade 3 and 7", "payment_pending", 90000, 2, kumar, "high"),
+        ("Greenfield School - teacher training", "quoted", 250000, 8, None, "medium"),
+        ("Online coding course enquiry (Instagram)", "contacted", 12000, 6, None, "medium"),
+        ("Iyer family - summer camp", "converted", 18000, 3, None, "medium"),
+        ("Bose - Grade 9 maths", "lost", 30000, 10, None, "low"),
+    ]:
+        item = pa.create_item(me, kind="lead", title=title, stage=stage, value=value, contact_id=contact,
+                              priority=prio, owner_id=p if stage != "quoted" else me, department="Admissions",
+                              source="whatsapp" if contact else "manual",
+                              status="closed" if stage in ("converted", "lost") else "open",
+                              follow_up_at=now + timedelta(hours=3) if stage == "demo_pending" else None)
+        pa.conn.execute("UPDATE items SET updated_at = ?, created_at = ? WHERE id = ?",
+                        ((now - timedelta(days=days)).isoformat(), (now - timedelta(days=days + 2)).isoformat(), item))
+        if stage == "lost":
+            pa.update_item(item, me, data={"lost_reason": "Fees too high"})
+    pa.create_item(me, kind="waiting", title="Rahul to share the login fix build", waiting_on="Rahul (sample)",
+                   status="waiting", due_at=now - timedelta(hours=5), contact_id=rahul, department="Application",
+                   waiting_since=now - timedelta(days=2), source="whatsapp")
+    pa.create_item(me, kind="follow_up", title="Send fee structure to Mr. Kumar", owner_id=me, priority="high",
+                   due_at=now + timedelta(hours=2), contact_id=kumar, department="Admissions")
+    pa.create_item(me, kind="decision", title="Approve new mentor salary bands", priority="high",
+                   department="Management", due_at=now + timedelta(days=1))
+    pa.create_item(me, kind="task", title="Publish November class timetable", owner_id=p, priority="medium",
+                   department="Academics", due_at=now - timedelta(days=1))
+    for title, stage, envname in [("Student dashboard: 'Join class' button does nothing", "fix_required", "development"),
+                                  ("Mentor login slow on Production (8 s)", "ready_for_test", "production"),
+                                  ("Teacher attendance export shows wrong dates", "new", "development")]:
+        pa.create_item("QA", kind="qa_issue", title=title, stage=stage, department="Application", priority="high",
+                       status="ready_for_retest" if stage == "ready_for_test" else "open", source="qa",
+                       data={"environment": envname, "occurrences": 2})
+    for days, title in [(1, "Class started 20 minutes late (Grade 6)"), (4, "Teacher joined late for revision class"),
+                        (9, "Grade 8 class moved without telling parents")]:
+        i = pa.create_item(me, kind="quality", title=title, department="Academics", data={"category": "Scheduling"})
+        pa.conn.execute("UPDATE items SET created_at = ? WHERE id = ?", ((now - timedelta(days=days)).isoformat(), i))
+    pa.conn.commit()
+    pa.add_message("whatsapp", "in", "demo-1", "Hi, can we do the demo class tomorrow at 5pm? My daughter is free then.",
+                   now - timedelta(hours=3), sender="919800000001", contact_id=sharma)
+    pa.add_message("whatsapp", "in", "demo-2", "Payment link not working, please check", now - timedelta(hours=26),
+                   sender="919800000002", contact_id=kumar)
+    pa.add_outbox("whatsapp", "919800000002", "Hello Mr. Kumar, sorry about the payment link. Here is a fresh one: "
+                  "[link]. The fee for both children is ₹90,000 for the year. Happy to help with anything else.",
+                  me, recipient_name="Mr. Kumar (sample)", reason="Reply to: payment link not working")
+    run = pa.start_qa_run("development")
+    pa.finish_qa_run(run, "failed", "5 of 6 checks passed", [
+        {"environment": "development", "role": r, "workflow": "Sign in and open home", "ok": r != "Student",
+         "error": "" if r != "Student" else "Expected text 'Join class' not found", "duration_ms": 2100}
+        for r in ("Super Admin", "Mentor", "Teacher", "Student", "Coordinator", "IT Support")])
+    prefs.save(store, {"setup_done": True}, "demo")
 
 
 def run_demo(port: int = 8080, open_browser: bool = True, config_path: str | None = None) -> None:

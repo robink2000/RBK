@@ -15,6 +15,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dotenv import dotenv_values
 
+from .team import hash_password
+
 MIN_PASSWORD = 10
 # Values older copies of .env.example switched on. They are the built-in defaults anyway, but set in
 # .env they would lock the matching fields on the Integrations page, so setup switches them off.
@@ -130,7 +132,7 @@ def apply(env_path: Path, config_path: Path, email: str, name: str, password: st
     updates: dict[str, str | None] = {
         "OWNER_EMAIL": email,
         "OWNER_NAME": name.strip(),
-        "DASHBOARD_PASSWORD": password,
+        "DASHBOARD_PASSWORD": hash_password(password),   # only the scrypt hash is stored
         "PUBLIC_URL": url,
         "DASHBOARD_INSECURE_COOKIE": "1" if local else None,
     }
@@ -200,3 +202,15 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def protect_env(env_path: Path) -> bool:
+    """Replace a plain-text DASHBOARD_PASSWORD in .env with its scrypt hash. Returns True if it changed."""
+    from .team import is_password_hash
+    if not env_path.is_file():
+        return False
+    value = (dotenv_values(env_path).get("DASHBOARD_PASSWORD") or "").strip()
+    if not value or is_password_hash(value):
+        return False
+    write_env(env_path, {"DASHBOARD_PASSWORD": hash_password(value)})
+    return True

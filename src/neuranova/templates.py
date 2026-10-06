@@ -47,6 +47,29 @@ BASE = """<!doctype html>
   --good-ink: #0ca30c;
 }
 * { box-sizing: border-box; }
+/* app shell: fixed sidebar on wide screens, a scrolling bar on phones */
+nav.side { position: fixed; inset: 0 auto 0 0; width: 236px; background: var(--surface); border-right: 1px solid var(--border);
+           display: flex; flex-direction: column; gap: 14px; padding: calc(16px + env(safe-area-inset-top, 0px)) 14px 16px; z-index: 5; }
+main:has(> nav.side) { margin-left: 236px; max-width: 1240px; }
+nav.side .brand img { width: 36px; height: 36px; }
+.pa-tag { font: 700 11px var(--font-display); color: var(--accent-ink); background: var(--accent); border-radius: 6px; padding: 1px 6px; vertical-align: middle; }
+.nav-links { display: flex; flex-direction: column; gap: 2px; flex: 1; overflow-y: auto; }
+.nav-links a { color: var(--ink-2); text-decoration: none; padding: 8px 10px; border-radius: 8px; font-weight: 550; font-size: 14px; }
+.nav-links a:hover { background: var(--page); color: var(--ink); }
+.nav-links a.on { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--ink); }
+.me { border-top: 1px solid var(--grid); padding-top: 10px; display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 14px; }
+header.pagehead { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+header.pagehead h1 { font-size: 24px; }
+form.quick input { width: min(320px, 100%); }
+@media (max-width: 900px) {
+  nav.side { position: static; width: auto; flex-direction: row; flex-wrap: wrap; align-items: center; padding: 10px 0; border-right: 0;
+             border-bottom: 1px solid var(--border); background: transparent; margin-bottom: 12px; gap: 8px; }
+  main:has(> nav.side) { margin-left: auto; }
+  .nav-links { flex-direction: row; overflow-x: auto; flex-basis: 100%; order: 3; padding-bottom: 4px; }
+  .nav-links a { white-space: nowrap; }
+  .me { border: 0; padding: 0; margin-left: auto; }
+  nav.side .brand-tag { display: none; }
+}
 body { margin: 0; background: var(--page); color: var(--ink); font: 15px/1.5 var(--font-body); }
 h1, h2, .hero, .brand-name { font-family: var(--font-display); text-wrap: balance; }
 h2 { letter-spacing: -0.005em; }
@@ -174,6 +197,8 @@ ul.w-steps { margin: 0 0 8px 18px; padding: 0; color: var(--ink-2); font-size: 1
 .server-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr)); gap: 8px; margin-top: 8px; }
 .server-grid input { width: 100%; }
 details.advanced { margin-top: 24px; }
+.ai-switch { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; padding: 10px 16px; margin-bottom: 12px; }
+.radio { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
 details.advanced > summary { cursor: pointer; }
 </style>
 </head>
@@ -197,17 +222,31 @@ LOGIN = """{% extends "base" %}{% from "nav" import brand_logo, brand_wordmark w
 
 NAV = """{% macro brand_logo() %}<img src="/brand/logo" alt="{{ brand.name }} logo" width="40" height="40">{% endmacro %}
 {% macro brand_wordmark() %}{% if brand.name == 'NeuraNova' %}Neura<span class="nova">Nova</span>{% else %}{{ brand.name }}{% endif %}{% endmacro %}
-{% macro top(page, user, csrf, today) %}
-<header>
-  <a class="brand" href="/" aria-label="{{ brand.name }} home">{{ brand_logo() }}
-    <div><div class="brand-name">{{ brand_wordmark() }}</div><div class="sub">{{ today }}</div></div></a>
-  <nav class="top" aria-label="Main">
-    <a href="/" class="{{ 'on' if page == 'home' else '' }}">Home</a>
-    <a href="/team" class="{{ 'on' if page == 'team' else '' }}">Team</a>
-    {% if user.id == owner_id %}<a href="/integrations" class="{{ 'on' if page == 'integrations' else '' }}">Integrations</a>{% endif %}
-    <span class="who">{{ user.name }} · {{ user.role }}</span>
+{% macro top(page, user, csrf, today, title='') %}
+{% set founder = user.id == owner_id %}
+{% set nav = [('home', '/', 'Dashboard', True), ('today', '/today', 'Today', True), ('tasks', '/tasks', 'Tasks', True),
+              ('business', '/business', 'Business', True), ('communications', '/communications', 'Communications', founder),
+              ('qa', '/qa', 'Application QA', True), ('quality', '/quality', 'Quality', True),
+              ('reports', '/reports', 'Reports', user.role == 'admin'), ('assistant', '/assistant', 'AI Assistant', True),
+              ('settings', '/settings', 'Settings', user.role == 'admin')] %}
+<nav class="side" aria-label="Main">
+  <a class="brand" href="/" aria-label="{{ brand.name }} PA home">{{ brand_logo() }}
+    <div><div class="brand-name">{{ brand_wordmark() }} <span class="pa-tag">PA</span></div><div class="brand-tag">Personal Assistant</div></div></a>
+  <div class="nav-links">
+  {% for key, href, label, show in nav if show %}<a href="{{ href }}" class="{{ 'on' if page == key else '' }}" {{ 'aria-current=page' if page == key else '' }}>{{ label }}</a>{% endfor %}
+  </div>
+  <div class="me">
+    <div><strong>{{ user.name }}</strong><div class="meta">{{ 'Founder' if founder else user.role|capitalize }}{% if safe_mode %} · <span title="Outgoing messages wait for approval">Safe Mode on</span>{% endif %}</div></div>
     <form class="inline" method="post" action="/logout"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link" type="submit">Sign out</button></form>
-  </nav>
+  </div>
+</nav>
+<header class="pagehead">
+  {% set titles = {'home': 'Dashboard', 'today': 'Today', 'tasks': 'Tasks', 'business': 'Business',
+                   'communications': 'Communications', 'qa': 'Application QA', 'quality': 'Quality', 'reports': 'Reports',
+                   'assistant': 'AI Assistant', 'settings': 'Settings', 'team': 'Team', 'integrations': 'Integrations'} %}
+  <div><h1>{{ title or titles.get(page, '') }}</h1>
+  <div class="sub">{{ today }}</div></div>
+  <form class="quick" method="get" action="/search" role="search"><input name="q" type="search" placeholder="Search tasks, people, leads…" aria-label="Search"></form>
 </header>
 {% endmacro %}
 
@@ -258,7 +297,7 @@ CHART = """{% macro chart(c, title, table_label, note="") %}
 </table></details>
 {% endmacro %}"""
 
-DASHBOARD = """{% extends "base" %}{% from "chart" import chart %}{% from "nav" import top, task_row with context %}{% block body %}
+DASHBOARD = """{% extends "base" %}{% from "chart" import chart %}{% from "nav" import top, task_row with context %}{% from "pa" import briefing with context %}{% block body %}
 {% macro mytasks() %}
 <section class="card" id="mytasks">
   <h2>My team tasks ({{ my_tasks|length }})</h2>
@@ -270,8 +309,15 @@ DASHBOARD = """{% extends "base" %}{% from "chart" import chart %}{% from "nav" 
 {% endmacro %}
 {{ top('home', me, csrf, today) }}
 {% if msg %}<div class="flash" role="status">{{ msg }}</div>{% endif %}
+{% if is_owner and not setup_done %}
+<section class="card setup-nudge">
+  <div><h2 style="margin:0">Welcome to NeuraNova PA</h2><div class="sub">A 10-step setup connects email, WhatsApp, calendar, AI and your applications. Every step can be skipped.</div></div>
+  <a class="btn" href="/setup">Start setup</a>
+</section>
+{% endif %}
+{% if b %}{{ briefing(b, True) }}{% endif %}
 {% if not is_owner %}{{ mytasks() }}{% endif %}
-{% if is_owner and setup and setup.connected < setup.total %}
+{% if is_owner and setup and setup.connected < setup.total and setup_done %}
 <section class="card setup-nudge">
   <div><h2 style="margin:0">Finish connecting your accounts</h2>
     <div class="sub">{{ setup.connected }} of {{ setup.total }} connected{% if setup.missing %}. Still to do: {{ setup.missing|join(', ') }}{% endif %}.</div></div>
@@ -390,12 +436,6 @@ DASHBOARD = """{% extends "base" %}{% from "chart" import chart %}{% from "nav" 
   </table></div>
 </section>
 
-{% if is_owner %}
-<section class="card">
-  <h2>Agent activity</h2>
-  <div class="scroll"><table>{% for a in activity %}<tr><td class="meta" style="white-space:nowrap">{{ a.at }}</td><td>{{ a.action }}</td><td class="meta">{{ a.detail }}</td></tr>{% endfor %}</table></div>
-</section>
-{% endif %}
 {% endblock %}"""
 
 def manifest(brand) -> dict:
@@ -522,7 +562,8 @@ TEAM = """{% extends "base" %}{% from "nav" import top, task_row with context %}
 
 INTEGRATIONS = """{% extends "base" %}{% from "nav" import top with context %}{% block body %}
 {% macro status_pill(c) %}{% set st = {'connected': ('good', '✓', 'Connected'), 'error': ('critical', '✕', 'Needs attention'),
-   'ready': ('ready', '…', 'Not tested'), 'not_connected': ('none', '–', 'Not connected')}[c.status] %}
+   'ready': ('ready', '…', 'Not tested'), 'not_connected': ('none', '–', 'Not connected'),
+   'disabled': ('none', '⏸', 'Disabled'), 'expired': ('warning', '!', 'Expired — reconnect')}[c.status] %}
 <span class="pill s-{{ st[0] }}"><span class="dot" aria-hidden="true">{{ st[1] }}</span>{{ st[2] }}</span>{% endmacro %}
 {% macro email_card(c) %}
 {% set f = {} %}{% for x in c.fields %}{% set _ = f.update({x.key: x}) %}{% endfor %}
@@ -575,7 +616,9 @@ INTEGRATIONS = """{% extends "base" %}{% from "nav" import top with context %}{%
         <div class="actions">
           <button class="primary" type="submit">{{ 'Save & test' if c.status == 'connected' else 'Connect' }}</button>
           {% if c.configured %}<button type="submit" formaction="/integrations/email/test">Test</button>
-          <button class="link" type="submit" formaction="/integrations/email/disconnect">Disconnect</button>{% endif %}
+          <button class="link" type="submit" formaction="/integrations/email/disconnect">Disconnect</button>
+          <button class="link" type="submit" formaction="/integrations/email/disable">Disable</button>{% endif %}
+          {% if c.status == 'disabled' %}<button type="submit" formaction="/integrations/email/enable">Enable</button>{% endif %}
         </div>
       </form>
       {% endif %}
@@ -597,9 +640,21 @@ INTEGRATIONS = """{% extends "base" %}{% from "nav" import top with context %}{%
   <p class="sub" style="margin-bottom:0">Keys and sign-ins are stored encrypted on your own server and are checked every morning. If one stops working, you get a WhatsApp alert.</p>
 </section>
 
-{% for group in ['Email', 'AI', 'Tasks', 'Messaging', 'Email (advanced)'] %}
+{% for group in ['Email', 'AI', 'Messaging', 'Calendar & documents', 'Tasks', 'Email (advanced)'] %}
 {% if group == 'Email (advanced)' %}<details class="advanced"><summary class="int-group">Advanced: connect email with Google or Microsoft sign-in instead</summary>{% else %}
-<div class="int-group">{{ group }}</div>{% endif %}
+<div class="int-group" {{ 'id=ai' if group == 'AI' else '' }}>{{ group }}</div>{% endif %}
+{% if group == 'AI' %}
+<form class="ai-switch card" method="post" action="/integrations/ai/provider">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <span>The PA uses</span>
+  {% for key, label in [('claude', 'Claude'), ('openai', 'OpenAI')] %}
+  <label class="radio"><input type="radio" name="provider" value="{{ key }}" {{ 'checked' if ai.current == key else '' }}
+    {{ 'disabled' if ai.locked else '' }} onchange="this.form.submit()"> {{ label }}{% if not ai.have[key] %} <small class="meta">(not connected)</small>{% endif %}</label>
+  {% endfor %}
+  {% if ai.locked %}<span class="meta">Set in the .env file</span>{% endif %}
+  <noscript><button type="submit">Save</button></noscript>
+</form>
+{% endif %}
 <div class="int-grid">
 {% for c in cards if c.category == group %}
   {% if c.wizard %}{{ email_card(c) }}{% else %}
@@ -635,11 +690,13 @@ INTEGRATIONS = """{% extends "base" %}{% from "nav" import top with context %}{%
       <div class="actions">
         {% if c.fields %}<button class="{{ '' if c.oauth else 'primary' }}" type="submit">Save &amp; test</button>{% endif %}
         {% if c.oauth %}
-        <button class="primary" type="submit" formaction="/integrations/{{ c.oauth }}/connect">{{ 'Reconnect' if c.signed_in else 'Connect' }} with {{ 'Google' if c.oauth == 'google' else 'Microsoft' }}</button>
+        <button class="primary" type="submit" formaction="/integrations/{{ c.oauth }}/connect">{{ 'Reconnect' if c.signed_in else 'Connect' }} with {{ 'Microsoft' if c.oauth == 'microsoft' else 'Google' }}</button>
         {% endif %}
         {% if c.configured %}<button type="submit" formaction="/integrations/{{ c.name }}/test">Test</button>{% endif %}
         {% if c.name == 'whatsapp' and c.configured %}<button type="submit" formaction="/integrations/whatsapp/send-test">Send me a test message</button>{% endif %}
         {% if c.configured or c.signed_in %}<button class="link" type="submit" formaction="/integrations/{{ c.name }}/disconnect">Disconnect</button>{% endif %}
+        {% if c.status == 'disabled' %}<button type="submit" formaction="/integrations/{{ c.name }}/enable">Enable</button>
+        {% elif c.configured or c.signed_in %}<button class="link" type="submit" formaction="/integrations/{{ c.name }}/disable">Disable</button>{% endif %}
       </div>
     </form>
 
@@ -648,7 +705,7 @@ INTEGRATIONS = """{% extends "base" %}{% from "nav" import top with context %}{%
       <ol class="steps">{% for step in c.steps %}<li>{{ step }}</li>{% endfor %}</ol>
       {% if c.redirect_uri %}
       <div class="copyrow"><input readonly value="{{ c.redirect_uri }}" aria-label="Redirect URI" onclick="this.select()"><button type="button" data-copy="{{ c.redirect_uri }}">Copy</button></div>
-      <small class="meta">Redirect URI: paste this into the {{ 'Google' if c.oauth == 'google' else 'Microsoft' }} app settings.</small>
+      <small class="meta">Redirect URI: paste this into the {{ 'Microsoft' if c.oauth == 'microsoft' else 'Google' }} app settings.</small>
       {% endif %}
       {% if c.webhook_url %}
       <div class="copyrow"><input readonly value="{{ c.webhook_url }}" aria-label="Webhook URL" onclick="this.select()"><button type="button" data-copy="{{ c.webhook_url }}">Copy</button></div>
@@ -686,3 +743,7 @@ env = Environment(
 )
 env.globals["brand"] = {"name": "NeuraNova", "tagline": "Operations console", "accent": "#6b1fa3",
                         "accent_dark": "#a06ad9"}
+
+from .pa_templates import register as _register_pa  # noqa: E402
+
+_register_pa(env)

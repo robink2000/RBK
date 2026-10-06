@@ -142,6 +142,13 @@ class OutlookConnector:
         body = resp.json()
         return ((body.get("uniqueBody") or {}).get("content") or body.get("bodyPreview", "")).strip()
 
+    def send_new(self, to: str, subject: str, body: str) -> str:
+        resp = self.http.post(f"{GRAPH}/me/sendMail", headers=self.headers, json={
+            "message": {"subject": subject, "body": {"contentType": "Text", "content": body},
+                        "toRecipients": [{"emailAddress": {"address": to}}]}, "saveToSentItems": True})
+        resp.raise_for_status()
+        return to
+
     def send_reply(self, external_id: str, body: str) -> str:
         # `comment` is HTML placed above the quoted original, like replying in Outlook.
         comment = html.escape(body).replace("\n", "<br>")

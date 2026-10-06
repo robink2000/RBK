@@ -79,6 +79,45 @@ CATALOG: tuple[Integration, ...] = (
         links=(("Claude Console", "https://console.anthropic.com/settings/keys"),),
     ),
     Integration(
+        "openai", "OpenAI", "AI",
+        "An alternative AI for the PA. Use it instead of Claude if you prefer.",
+        ("Email triage", "Reply drafts", "Briefings", "Chat"),
+        fields=(Field("OPENAI_API_KEY", "API key", secret=True, placeholder="sk-..."),
+                Field("OPENAI_MODEL", "Model", placeholder="gpt-4.1",
+                      help="The model name from your OpenAI account, e.g. gpt-4.1. Test checks it exists.")),
+        steps=("Open the OpenAI platform and sign in.", "Go to API keys and create a key named NeuraNova.",
+               "Paste it here with the model name and press Save & test.",
+               "Choose which AI the PA uses with the switch above the AI cards."),
+        links=(("OpenAI API keys", "https://platform.openai.com/api-keys"),),
+    ),
+    Integration(
+        "calendar", "Calendar", "Calendar & documents",
+        "Your meetings: what's today, what to prepare, and actions to capture afterwards. Google or Outlook.",
+        ("Meetings today", "Meeting prep", "Follow-ups after meetings"),
+        fields=(Field("CALENDAR_ICS_URLS", "Private calendar address (iCal)", secret=True,
+                      placeholder="https://calendar.google.com/calendar/ical/.../basic.ics",
+                      help="For more than one calendar, separate the addresses with a space."),),
+        steps=("Google Calendar: open Settings, click your calendar on the left, scroll to Integrate calendar and "
+               "copy the Secret address in iCal format.",
+               "Outlook: Settings → Calendar → Shared calendars → Publish a calendar → copy the ICS link.",
+               "Paste it here and press Save & test. The address is private, so it's stored encrypted."),
+        links=(("Google Calendar settings", "https://calendar.google.com/calendar/r/settings"),
+               ("Outlook calendar sharing", "https://outlook.live.com/calendar/0/options/calendar/SharedCalendars")),
+    ),
+    Integration(
+        "drive", "Google Drive", "Calendar & documents",
+        "Saves every report as a Google Doc in a NeuraNova PA Reports folder. The PA can only see files it creates.",
+        ("Reports in Drive",),
+        fields=(Field("GOOGLE_CLIENT_ID", "Google client ID", placeholder="1234-abc.apps.googleusercontent.com"),
+                Field("GOOGLE_CLIENT_SECRET", "Google client secret", secret=True)),
+        oauth="google_drive", token_key="GDRIVE_TOKEN_JSON",
+        steps=("Uses the same Google Cloud app as Gmail sign-in (Advanced). Enable the Google Drive API in it.",
+               "Add the redirect URI shown here to the app's OAuth client.",
+               "Paste the client ID and secret, save, then press Connect with Google."),
+        links=(("Enable Drive API", "https://console.cloud.google.com/apis/library/drive.googleapis.com"),
+               ("Google Cloud credentials", "https://console.cloud.google.com/apis/credentials")),
+    ),
+    Integration(
         "gmail", "Gmail with Google sign-in", "Email (advanced)",
         "Only if your company turned off app passwords. Needs a one-time app on Google Cloud.",
         ("Inbox triage", "4-hour reply tracking", "Reply drafts"),
@@ -196,13 +235,31 @@ def with_integrations(settings, store: Store):
     if vault is None:
         return settings
     extra: dict[str, str] = {}
+    off = disabled(store)
     for row in store.integrations():
+        if row["name"] in off:
+            continue  # switched off in the console: keep the keys, don't use them
         for key, value in vault.open(row["data_enc"]).items():
             if isinstance(value, str) and value and not settings.env.get(key):
                 extra[key] = value
     if "WHATSAPP_PHONE_NUMBER_ID" in extra and not settings.env.get("NOTIFY_CHANNEL"):
         extra["NOTIFY_CHANNEL"] = "whatsapp"
     return replace(settings, env={**settings.env, **extra}) if extra else settings
+
+
+DISABLED_KEY = "integrations_disabled"
+EXPIRED_HINTS = ("expired", "invalid_grant", "revoked", "token has been", "reauth", "sign in again", "401")
+
+
+def disabled(store: Store) -> set[str]:
+    return set(json.loads(store.get(DISABLED_KEY) or "[]"))
+
+
+def set_enabled(store: Store, name: str, enabled: bool, by_user: str) -> None:
+    off = disabled(store)
+    off.discard(name) if enabled else off.add(name)
+    store.put(DISABLED_KEY, json.dumps(sorted(off)))
+    store.log("integration_enabled" if enabled else "integration_disabled", integration=name, by=by_user)
 
 
 def from_env(settings, key: str) -> bool:
@@ -234,6 +291,29 @@ def test_integration(name: str, settings, store: Store) -> tuple[bool, str, str 
                 return False, "Add an API key.", None
             model = anthropic.Anthropic(api_key=s("ANTHROPIC_API_KEY")).models.retrieve(settings.model)
             return True, f"Key works. Using {model.display_name}.", None
+        if name == "calendar":
+            urls = s("CALENDAR_ICS_URLS").split()
+            if not urls:
+                return False, "Paste your private calendar address.", None
+            from .pa.calendar import fetch
+            events = fetch(urls, settings.tz)
+            return True, f"Connected. {len(events)} events in the next 7 days.", f"{len(urls)} calendar(s)"
+        if name == "drive":
+            if not s("GDRIVE_TOKEN_JSON"):
+                return False, "Not signed in yet. Press Connect with Google.", None
+            from .pa.drive import account
+            email = account(s("GDRIVE_TOKEN_JSON"),
+                            on_refresh=lambda t: save_values(store, settings, "drive", {"GDRIVE_TOKEN_JSON": t}, "agent"))
+            return True, "Reports will be saved to your Drive.", email
+        if name == "openai":
+            if not s("OPENAI_API_KEY"):
+                return False, "Add an API key.", None
+            if not s("OPENAI_MODEL"):
+                return False, "Add the model name.", None
+            from openai import OpenAI
+
+            model = OpenAI(api_key=s("OPENAI_API_KEY")).models.retrieve(s("OPENAI_MODEL"))
+            return True, f"Key works. Model {model.id} is available.", None
         if name == "email":
             conn = email_connector(settings)
             if conn is None:
@@ -390,10 +470,12 @@ def _take_state(store: Store, provider: str, state: str) -> dict | None:
     return data if data.get("exp", 0) > time.time() else None
 
 
-def _google_flow(settings, uri: str, code_verifier: str | None = None):
+def _google_flow(settings, uri: str, code_verifier: str | None = None, scopes: list[str] | None = None):
     from google_auth_oauthlib.flow import Flow
 
-    from .connectors.gmail import SCOPES
+    from .connectors.gmail import SCOPES as GMAIL_SCOPES
+
+    SCOPES = scopes or GMAIL_SCOPES
 
     config = {"web": {"client_id": settings.secret("GOOGLE_CLIENT_ID"),
                       "client_secret": settings.secret("GOOGLE_CLIENT_SECRET"),
@@ -403,17 +485,24 @@ def _google_flow(settings, uri: str, code_verifier: str | None = None):
                                    autogenerate_code_verifier=code_verifier is None)
 
 
+def _scopes_for(provider: str):
+    if provider == "google_drive":
+        from .pa.drive import SCOPES
+        return SCOPES
+    return None
+
+
 def start_oauth(provider: str, settings, store: Store, base_url: str, user_id: str) -> str:
     """URL to send the browser to."""
     settings = with_integrations(settings, store)
     uri = redirect_uri(base_url, provider)
     _allow_local_http(uri)
-    if provider == "google":
+    if provider in ("google", "google_drive"):
         if not (settings.secret("GOOGLE_CLIENT_ID") and settings.secret("GOOGLE_CLIENT_SECRET")):
             raise ValueError("Save your Google client ID and secret first.")
-        flow = _google_flow(settings, uri)
+        flow = _google_flow(settings, uri, scopes=_scopes_for(provider))
         url, state = flow.authorization_url(access_type="offline", prompt="consent", include_granted_scopes="true")
-        _save_state(store, "google", state, {"verifier": flow.code_verifier, "user": user_id, "uri": uri})
+        _save_state(store, provider, state, {"verifier": flow.code_verifier, "user": user_id, "uri": uri})
         return url
     if provider == "microsoft":
         from .connectors.outlook import SCOPES, make_app
@@ -437,12 +526,14 @@ def finish_oauth(provider: str, settings, store: Store, params: dict, user_id: s
         raise ValueError("This sign-in link expired. Press Connect again.")
     settings = with_integrations(settings, store)
     _allow_local_http(state["uri"])
-    if provider == "google":
-        flow = _google_flow(settings, state["uri"], code_verifier=state["verifier"])
+    if provider in ("google", "google_drive"):
+        flow = _google_flow(settings, state["uri"], code_verifier=state["verifier"], scopes=_scopes_for(provider))
         flow.fetch_token(code=params.get("code", ""))
-        save_values(store, settings, "gmail", {"GMAIL_TOKEN_JSON": flow.credentials.to_json()}, user_id)
-        ok, message = run_check("gmail", settings, store)
-        return "Gmail connected." if ok else f"Signed in, but the check failed: {message}"
+        name, key, label = ("gmail", "GMAIL_TOKEN_JSON", "Gmail") if provider == "google" else \
+            ("drive", "GDRIVE_TOKEN_JSON", "Google Drive")
+        save_values(store, settings, name, {key: flow.credentials.to_json()}, user_id)
+        ok, message = run_check(name, settings, store)
+        return f"{label} connected." if ok else f"Signed in, but the check failed: {message}"
     if provider == "microsoft":
         from .connectors.outlook import make_app
 
@@ -484,12 +575,17 @@ def _provider_help(settings) -> dict:
 def view(settings, store: Store, base_url: str) -> list[dict]:
     """Everything the Integrations page shows, per card."""
     merged = with_integrations(settings, store)
+    off = disabled(store)
     out = []
     for integ in CATALOG:
         row = store.integration(integ.name)
         saved = stored(store, settings, integ.name)
         configured = is_configured(integ.name, merged)
         status = row["status"] if row and configured else ("ready" if configured else "not_connected")
+        if integ.name in off:
+            status = "disabled"
+        elif status == "error" and any(h in (row["message"] or "").lower() for h in EXPIRED_HINTS):
+            status = "expired"
         fields = []
         for f in integ.fields:
             env_set = from_env(settings, f.key)
@@ -518,7 +614,44 @@ def view(settings, store: Store, base_url: str) -> list[dict]:
 def summary(cards: list[dict]) -> dict:
     """Progress over what the agent needs: one mailbox (any of the email options), Claude, Todoist, WhatsApp."""
     ok = {c["name"] for c in cards if c["status"] == "connected"}
-    needs = [("Email", {"email", "gmail", "outlook"}), ("Claude", {"claude"}), ("Todoist", {"todoist"}),
+    needs = [("Email", {"email", "gmail", "outlook"}), ("AI", {"claude", "openai"}), ("Todoist", {"todoist"}),
              ("WhatsApp", {"whatsapp"})]
     missing = [label for label, names in needs if not (names & ok)]
     return {"total": len(needs), "connected": len(needs) - len(missing), "missing": missing}
+
+
+def ai_choice(settings, store: Store) -> dict:
+    """Which AI the PA uses, and which are connected."""
+    merged = with_integrations(settings, store)
+    have = {"claude": bool(merged.secret("ANTHROPIC_API_KEY")), "openai": bool(merged.secret("OPENAI_API_KEY"))}
+    current = (merged.secret("AI_PROVIDER") or "").lower()
+    if current not in have:
+        current = "openai" if have["openai"] and not have["claude"] else "claude"
+    return {"current": current, "have": have, "locked": from_env(settings, "AI_PROVIDER")}
+
+
+DEFAULT_DEV_URL = "https://dev.neuranovaedu.com/classroom"
+
+
+def qa_config(settings, store: Store) -> dict:
+    """NeuraNova application addresses, role test accounts and workflows (Settings → Applications / Test accounts)."""
+    merged = with_integrations(settings, store)
+    s = merged.secret
+    try:
+        accounts = json.loads(s("QA_ACCOUNTS_JSON") or "{}")
+    except ValueError:
+        accounts = {}
+    return {
+        "production": s("NEURANOVA_PROD_URL"),
+        "development": s("NEURANOVA_DEV_URL") or "",
+        "login_path": s("NEURANOVA_LOGIN_PATH"),
+        "allow_prod_login": s("QA_ALLOW_PROD_LOGIN") != "0",
+        "accounts": {env: accounts.get(env, {}) for env in ("production", "development")},
+        "workflows": s("QA_WORKFLOWS"),
+        "prod_schedule": s("QA_PROD_EVERY_HOURS") or "1",
+        "dev_schedule": s("QA_DEV_DAILY_AT") or "07:30",
+    }
+
+
+def calendar_urls(settings, store: Store) -> list[str]:
+    return with_integrations(settings, store).secret("CALENDAR_ICS_URLS").split()

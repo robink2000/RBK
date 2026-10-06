@@ -110,7 +110,7 @@ def test_chat_logs_event_and_reports_tool_errors(settings, store):
 def test_chat_has_no_email_sending_tool():
     names = {t["name"] for t in TOOLS}
     assert not any("send" in n or "email" in n and n != "search_email" for n in names)
-    assert all(t["strict"] and t["input_schema"]["additionalProperties"] is False for t in TOOLS)
+    assert all(set(t) == {"name", "description", "properties"} for t in TOOLS)
 
 
 def test_sentences_are_not_mistaken_for_draft_commands(settings, store):
@@ -214,7 +214,7 @@ def test_custom_brand_logo_and_safe_colors(tmp_path):
     logo = tmp_path / "logo.png"
     logo.write_bytes(b"\x89PNG\r\n\x1a\nfake")
     cfg = tmp_path / "n.toml"
-    cfg.write_text(f'[brand]\nname = "Acme Ops"\naccent = "red;}}body{{display:none"\nlogo = "{logo}"\n')
+    cfg.write_text(f'[brand]\nname = "Acme Ops"\naccent = "red;}}body{{display:none"\nlogo = "{logo.as_posix()}"\n')
     env = {"DASHBOARD_PASSWORD": "pw-long-enough", "DASHBOARD_SECRET": "s" * 40, "DASHBOARD_INSECURE_COOKIE": "1",
            "NEURANOVA_DB": ":memory:"}
     settings = load_settings(cfg, env=env)

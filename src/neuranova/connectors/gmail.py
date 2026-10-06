@@ -69,6 +69,9 @@ class GmailConnector:
             service = build("gmail", "v1", credentials=creds, cache_discovery=False)
         self.api = service.users()
 
+    def send_new(self, to: str, subject: str, body: str) -> str:
+        return _send_new(self.api, to, subject, body)
+
     def profile_email(self) -> str:
         return self.api.getProfile(userId="me").execute().get("emailAddress", "")
 
@@ -139,6 +142,14 @@ class GmailConnector:
 def sender_name(sender: str) -> str:
     name, addr = parseaddr(sender)
     return name or addr or sender
+
+
+def _send_new(api, to: str, subject: str, body: str) -> str:
+    mime = MimeMessage()
+    mime["To"], mime["Subject"] = to, subject
+    mime.set_content(body)
+    raw = base64.urlsafe_b64encode(mime.as_bytes()).decode()
+    return api.messages().send(userId="me", body={"raw": raw}).execute()["id"]
 
 
 def _decode(data: str) -> str:

@@ -110,6 +110,12 @@ def mount_dashboard(app: FastAPI, settings: Settings, agent_factory: Callable, s
         return (user if user and user["active"] else None), cookie
 
     def page(_template: str, code: int = 200, **ctx) -> HTMLResponse:
+        if "me" in ctx and "safe_mode" not in ctx:
+            from .pa import prefs
+            try:
+                ctx["safe_mode"] = prefs.safe_mode(store if store is not None else agent_factory().store)
+            except Exception:
+                ctx["safe_mode"] = True
         return HTMLResponse(env.get_template(_template).render(**ctx), status_code=code,
                             headers={"Cache-Control": "no-store", "X-Frame-Options": "DENY",
                                      "Referrer-Policy": "no-referrer"})
@@ -181,7 +187,9 @@ def mount_dashboard(app: FastAPI, settings: Settings, agent_factory: Callable, s
         return signed_in(user["id"])
 
     def signed_in(user_id: str) -> Response:
-        resp = RedirectResponse("/", status_code=303)
+        from .pa import prefs
+        first_run = user_id == settings.owner_id and not prefs.get(agent_factory().store)["setup_done"]
+        resp = RedirectResponse("/setup" if first_run else "/", status_code=303)
         resp.set_cookie(COOKIE, sessions.issue(user_id), max_age=SESSION_SECONDS, httponly=True,
                         secure=secure_cookie, samesite="strict")
         return resp
@@ -237,8 +245,15 @@ def mount_dashboard(app: FastAPI, settings: Settings, agent_factory: Callable, s
             members=store.users(),
             my_tasks=[task_view(t, me, now) for t in store.team_tasks("open", assignee_id=me["id"])],
             kinds=EVENT_KINDS, events=store.recent_events(15),
-            drafts=[], waiting=[], tasks=[], tasks_error="", activity=[], setup=None,
+            drafts=[], waiting=[], tasks=[], tasks_error="", activity=[], setup=None, b=None, setup_done=True,
         )
+        try:
+            ctx["b"] = agent.briefing(user_name=me["name"]) if is_owner else None
+        except Exception:
+            log.exception("Briefing failed")
+        if is_owner:
+            from .pa import prefs
+            ctx["setup_done"] = prefs.get(store)["setup_done"]
         if is_owner and sessions:
             ctx["setup"] = integ.summary(integ.view(settings, store, public_url or str(request.base_url)))
         if is_owner:
@@ -264,8 +279,6 @@ def mount_dashboard(app: FastAPI, settings: Settings, agent_factory: Callable, s
                     ctx["tasks_error"] = "Couldn't reach Todoist right now."
             else:
                 ctx["tasks_error"] = "Todoist is not connected."
-            ctx["activity"] = [{"at": row_dt(a["at"]).astimezone(tz).strftime("%d %b %H:%M"), "action": a["action"],
-                                "detail": a["detail"][:160]} for a in store.recent_activity(15)]
         return page("dashboard", **ctx)
 
     # --- drafts (founder only: they send from the founder's mailbox) ------------------
@@ -520,7 +533,7 @@ def mount_dashboard(app: FastAPI, settings: Settings, agent_factory: Callable, s
         agent, me = g
         cards = integ.view(settings, agent.store, base_url(request))
         return page("integrations", me=me, csrf=sessions.csrf(request.cookies.get(COOKIE, "")), today=today_text(),
-                    msg=msg, cards=cards, progress=integ.summary(cards))
+                    msg=msg, cards=cards, progress=integ.summary(cards), ai=integ.ai_choice(settings, agent.store))
 
     def form_values(name: str, form) -> dict:
         allowed = {f.key: f for f in integ.BY_NAME[name].fields}
@@ -545,6 +558,18 @@ def mount_dashboard(app: FastAPI, settings: Settings, agent_factory: Callable, s
         results = [integ.run_check(c.name, settings, agent.store)[0]
                    for c in integ.CATALOG if integ.is_configured(c.name, merged)]
         return back("/integrations", f"Tested {len(results)}: {sum(results)} working, {len(results) - sum(results)} need attention.")
+
+    @app.post("/integrations/ai/provider")
+    def ai_provider(request: Request, csrf: str = Form(""), provider: str = Form("")) -> Response:
+        g = founder(request, csrf)
+        if isinstance(g, Response):
+            return g
+        agent, me = g
+        if provider not in ("claude", "openai"):
+            return back("/integrations#ai", "Choose Claude or OpenAI.")
+        integ.save_values(agent.store, settings, "ai", {"AI_PROVIDER": provider}, me["id"])
+        agent.store.log("ai_provider_changed", provider=provider, by=me["id"])
+        return back("/integrations#ai", f"The PA now uses {'OpenAI' if provider == 'openai' else 'Claude'}.")
 
     @app.post("/integrations/email/detect")
     def email_detect(request: Request, csrf: str = Form(""), address: str = Form("")) -> Response:
@@ -600,6 +625,26 @@ def mount_dashboard(app: FastAPI, settings: Settings, agent_factory: Callable, s
         integ.disconnect(name, g[0].store, g[1]["id"])
         return back(f"/integrations#{name}", f"{integ.BY_NAME[name].title} disconnected. Values set in .env still apply.")
 
+    @app.post("/integrations/{name}/disable")
+    def disable_one(request: Request, name: str, csrf: str = Form("")) -> Response:
+        return toggle(request, name, csrf, False)
+
+    @app.post("/integrations/{name}/enable")
+    def enable_one(request: Request, name: str, csrf: str = Form("")) -> Response:
+        return toggle(request, name, csrf, True)
+
+    def toggle(request: Request, name: str, csrf: str, on: bool) -> Response:
+        g = founder(request, csrf)
+        if isinstance(g, Response):
+            return g
+        agent, me = g
+        if name not in integ.BY_NAME:
+            return back("/integrations", "Unknown integration.")
+        integ.set_enabled(agent.store, name, on, me["id"])
+        title = integ.BY_NAME[name].title
+        return back(f"/integrations#{name}", f"{title} enabled." if on else
+                    f"{title} disabled. Its keys are kept; press Enable to use it again.")
+
     @app.post("/integrations/whatsapp/send-test")
     def whatsapp_test(request: Request, csrf: str = Form("")) -> Response:
         g = founder(request, csrf)
@@ -619,7 +664,7 @@ def mount_dashboard(app: FastAPI, settings: Settings, agent_factory: Callable, s
         if isinstance(g, Response):
             return g
         agent, me = g
-        name = {"google": "gmail", "microsoft": "outlook"}.get(provider)
+        name = {"google": "gmail", "microsoft": "outlook", "google_drive": "drive"}.get(provider)
         if name is None:
             return back("/integrations", "Unknown sign-in provider.")
         values = {k: v for k, v in form_values(name, form).items() if v}
@@ -636,7 +681,7 @@ def mount_dashboard(app: FastAPI, settings: Settings, agent_factory: Callable, s
         # Coming back from Google/Microsoft is a cross-site navigation, so the SameSite=Strict session
         # cookie is not sent here. The single-use, 15-minute state (bound to the founder who started it)
         # authorises this step; the page then moves on with a fresh same-site navigation.
-        if provider not in ("google", "microsoft"):
+        if provider not in ("google", "microsoft", "google_drive"):
             return Response(status_code=404)
         agent = agent_factory()
         try:
@@ -644,5 +689,11 @@ def mount_dashboard(app: FastAPI, settings: Settings, agent_factory: Callable, s
         except Exception as exc:
             log.warning("OAuth %s failed: %s", provider, exc)
             msg = f"✕ {exc}"
-        name = "gmail" if provider == "google" else "outlook"
+        name = {"google": "gmail", "microsoft": "outlook", "google_drive": "drive"}[provider]
         return page("return", url=f"/integrations?msg={quote(msg)}#{name}")
+
+    from types import SimpleNamespace
+    from .pa_web import mount_pa
+    mount_pa(app, SimpleNamespace(settings=settings, agent_factory=agent_factory, store=store, current=current,
+                                  page=page, back=back, guarded=guarded, founder=founder, today_text=today_text,
+                                  sessions=sessions, base_url=base_url))
