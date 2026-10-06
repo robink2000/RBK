@@ -42,7 +42,7 @@ def check(store, http: httpx.Client | None = None) -> dict | None:
     found = None
     for asset in release.get("assets", []):
         m = re.fullmatch(r"NeuraNova-PA-Setup-(\d+\.\d+\.\d+)\.exe", asset.get("name", ""))
-        if m:
+        if m and (found is None or _ver(m.group(1)) > _ver(found["version"])):   # the newest, whatever the order
             found = {"version": m.group(1), "url": asset.get("browser_download_url", ""),
                      "page": release.get("html_url", "")}
     store.put(KEY, json.dumps({"at": datetime.now(timezone.utc).isoformat(), "found": found}))
