@@ -255,7 +255,9 @@ def test_update_notice(tmp_path, monkeypatch):
             v = self.version
             return type("R", (), {"raise_for_status": lambda s: None, "json": lambda s: {
                 "html_url": "https://github.com/x/releases/latest",
-                "assets": [{"name": f"NeuraNova-PA-Setup-{v}.exe", "browser_download_url": f"https://dl/{v}.exe"}]}})()
+                "assets": [{"name": f"NeuraNova-PA-Setup-{v}.exe", "browser_download_url": f"https://dl/{v}.exe"},
+                           {"name": "NeuraNova-PA-Setup-0.0.1.exe", "browser_download_url": "https://dl/old.exe"},
+                           {"name": "NeuraNova-PA-Setup.exe", "browser_download_url": "https://dl/stable.exe"}]}})()
     monkeypatch.setenv("NEURANOVA_UPDATE_REPO", "x/y")
     assert updates.check(agent.store, Http("99.0.0"))["version"] == "99.0.0"
     assert "New version 99.0.0" in client.get("/today").text

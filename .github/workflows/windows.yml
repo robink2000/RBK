@@ -87,6 +87,12 @@ jobs:
           if (Test-Path $exe) { throw "uninstall left the program behind" }
           "Installer: install, start and uninstall all worked."
 
+      - name: Stable download names
+        shell: pwsh
+        run: |
+          Copy-Item (Get-ChildItem dist\NeuraNova-PA-Setup-*.exe | Select-Object -First 1).FullName dist\NeuraNova-PA-Setup.exe
+          Copy-Item (Get-ChildItem dist\NeuraNova-PA-Windows-*.zip | Select-Object -First 1).FullName dist\NeuraNova-PA-Windows.zip
+
       - uses: actions/upload-artifact@v4
         with:
           name: NeuraNova-PA-Windows-${{ steps.v.outputs.version }}
@@ -94,6 +100,16 @@ jobs:
             dist/NeuraNova-PA-Setup-*.exe
             dist/NeuraNova-PA-Windows-*.zip
           retention-days: 30
+
+      - name: Remove the previous files from the "latest" release
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $names = gh release view latest --repo ${{ github.repository }} --json assets -q '.assets[].name' 2>$null
+          foreach ($n in $names) { if ($n) { gh release delete-asset latest $n --repo ${{ github.repository }} -y } }
+          exit 0
 
       - name: Publish "latest" release
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -104,9 +120,11 @@ jobs:
           prerelease: false
           make_latest: true
           body: |
-            Download **NeuraNova-PA-Setup-${{ steps.v.outputs.version }}.exe**, run it, and open NeuraNova PA from the Start menu.
+            Download **NeuraNova-PA-Setup.exe** (version ${{ steps.v.outputs.version }}), run it, and open NeuraNova PA from the Start menu.
+            Already installed? Just run the new installer: it closes the running copy and keeps your data.
             No admin rights or Python needed. Prefer no installer? Use the ZIP and double-click "Start NeuraNova PA.bat".
             Built from ${{ github.sha }}.
           files: |
+            dist/NeuraNova-PA-Setup.exe
+            dist/NeuraNova-PA-Windows.zip
             dist/NeuraNova-PA-Setup-*.exe
-            dist/NeuraNova-PA-Windows-*.zip

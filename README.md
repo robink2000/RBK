@@ -8,14 +8,14 @@ NeuraNova PA watches your email, WhatsApp, calendar, team work and NeuraNova app
 
 ## Install on Windows (no Python needed)
 
-1. Download **NeuraNova-PA-Setup-1.2.0.exe** from the repository's **Releases** page ("latest"). Builds from a branch are under **Actions → Windows build → Artifacts**.
+1. Download **[NeuraNova-PA-Setup.exe](https://github.com/robink2000/RBK/releases/latest/download/NeuraNova-PA-Setup.exe)** (always the newest version). Builds from a branch are under **Actions → Windows build → Artifacts**.
 2. Run it. It installs for your user only, so you don't need admin rights. You can tick:
    - **Create a desktop shortcut**
    - **Start NeuraNova PA automatically when I sign in to Windows** (recommended, so reminders and checks keep running)
 3. Open **NeuraNova PA** from the Start menu. Your browser opens at **http://localhost:8080**. The PA keeps working in the background, shown by the NeuraNova icon in the system tray next to the clock. Click the icon to reopen it, or right-click → **Quit**.
 4. **First time:** create your login in the browser (email and password). Then sign in and follow the **10-step setup**. Every step can be skipped and changed later under Settings.
 
-**Prefer no installer?** Download **NeuraNova-PA-Windows-1.2.0.zip**, unzip it anywhere and double-click **Start NeuraNova PA.bat**. Run **Add to Windows startup.bat** once to start it automatically when you sign in.
+**Prefer no installer?** Download **NeuraNova-PA-Windows.zip**, unzip it anywhere and double-click **Start NeuraNova PA.bat**. Run **Add to Windows startup.bat** once to start it automatically when you sign in.
 
 **Just want to look around first?** Start menu → **NeuraNova PA (sample data demo)**, or **Start demo (sample data).bat** in the ZIP. Sign in with `you@neuranova.demo` / `neuranova-demo`. It uses sample data only, kept apart from your real data.
 
