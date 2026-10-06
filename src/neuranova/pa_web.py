@@ -50,9 +50,9 @@ def mount_pa(app: FastAPI, w) -> None:
         if not me:
             return RedirectResponse("/login", status_code=303)
         if owner and me["id"] != settings.owner_id:
-            return Response("Only the founder can open this page.", status_code=403)
+            return w.oops("Only the founder can open this page.")
         if admin and me["role"] != "admin":
-            return Response("Admins only.", status_code=403)
+            return w.oops("Admins only.")
         return agent, me, w.sessions.csrf(cookie)
 
     def render(name, agent, me, csrf, request, **ctx):
@@ -107,7 +107,7 @@ def mount_pa(app: FastAPI, w) -> None:
             return g
         agent, me = g
         if me["id"] != settings.owner_id:
-            return Response("Only the founder can run setup.", status_code=403)
+            return w.oops("Only the founder can run setup.")
         key = SETUP_STEPS[max(1, min(step, len(SETUP_STEPS))) - 1][0]
         if form.get("action") != "skip":
             try:
@@ -132,6 +132,12 @@ def mount_pa(app: FastAPI, w) -> None:
         meet = agent.meetings()
         is_owner = me["id"] == settings.owner_id
         b = agent.briefing(meetings=meet["today"], user_name=me["name"]) if is_owner else None
+        if b:  # let the founder tick items off straight from Today
+            for entries in b["focus"].values():
+                for e in entries:
+                    if e.get("kind") in KINDS and e.get("id"):
+                        row = agent.pa.item(e["id"])
+                        e["can_change"] = bool(row and can_change(me, row))
         mine = [item_view(r, me) for r in agent.pa.items(owner_id=me["id"], limit=200)]
         todoist, todoist_error = [], ""
         if is_owner and agent.todoist:
@@ -196,6 +202,33 @@ def mount_pa(app: FastAPI, w) -> None:
         return render("tasks", agent, me, csrf, request, items=items, members=agent.store.users(), by_owner=by_owner,
                       f={"kind": kind, "status": status, "owner": owner, "department": department, "q": q, "when": when})
 
+    @app.post("/tasks/quick")
+    async def task_quick(request: Request):
+        """One box: "Call Ravi's parents tomorrow 3pm". The date is understood from the words; it's yours."""
+        form = await request.form()
+        g = w.guarded(request, form.get("csrf", ""))
+        if isinstance(g, Response):
+            return g
+        agent, me = g
+        text = " ".join((form.get("text") or "").split())[:200]
+        back_to = _same_site(form.get("back") or request.headers.get("referer", ""), "/tasks")
+        if not text:
+            return w.back(back_to, "Type what needs doing.")
+        kind = form.get("kind") if form.get("kind") in KINDS else "task"
+        dupe = agent.pa.similar_open(text, kind=kind, threshold=0.8)
+        if dupe is not None:
+            return w.back(f"/tasks/{dupe['id']}", f"This is already open as #{dupe['id']}, so it wasn't added twice.")
+        due = parse_deadline(text, tz_now(), end_of_day=settings.working_hours.end)
+        extra: dict = {}
+        if kind == "waiting":
+            extra = {"status": "waiting", "waiting_since": datetime.now(timezone.utc)}
+        elif kind in ("lead", "qa_issue"):
+            extra = {"stage": "new"}
+        item_id = agent.pa.create_item(me["id"], kind=kind, title=text, due_at=due, source="manual",
+                                       owner_id=me["id"], **extra)
+        when = f", due {due.astimezone(settings.tz):%a %d %b %H:%M}" if due else ""
+        return w.back(back_to, f"Added #{item_id}{when}. Open it to add details.")
+
     @app.post("/tasks")
     async def task_create(request: Request):
         form = await request.form()
@@ -249,7 +282,7 @@ def mount_pa(app: FastAPI, w) -> None:
         if row is None:
             return w.back("/tasks", f"No item #{item_id}.")
         events = [{"at": row_dt(e["at"]).astimezone(settings.tz).strftime("%d %b %H:%M"), "actor": _actor(agent, e["actor"]),
-                   "event": e["event"], "detail": _event_text(e)} for e in agent.pa.item_events(item_id)]
+                   "event": e["event"], "detail": _event_text(e, agent)} for e in agent.pa.item_events(item_id)]
         contact = agent.pa.contact(row["contact_id"]) if row["contact_id"] else None
         return render("task", agent, me, csrf, request, i=item_view(row, me), events=events, members=agent.store.users(),
                       contact=contact, evidence=_evidence(row))
@@ -303,6 +336,14 @@ def mount_pa(app: FastAPI, w) -> None:
                 if fields.get("owner_id") and fields["owner_id"] not in (row["owner_id"], me["id"]):
                     agent.notify_user(agent.store.user(fields["owner_id"]), f"📌 {me['name']} gave you #{item_id}: {row['title']}")
                 msg = "Saved."
+            elif action == "snooze":
+                due = row_dt(row["due_at"]) if row["due_at"] else None
+                local = due.astimezone(settings.tz) if due else None
+                tomorrow = (tz_now() + timedelta(days=1)).date()
+                at = local.timetz() if local else settings.working_hours.start.replace(tzinfo=settings.tz)
+                new_due = datetime.combine(tomorrow, at.replace(tzinfo=None), settings.tz)
+                agent.pa.update_item(item_id, me["id"], note="Moved to tomorrow", due_at=new_due, overdue_alerted=0)
+                msg = f"Moved to tomorrow {new_due:%H:%M}."
             elif action == "qa_stage":
                 qa.set_stage(agent.pa, item_id, form.get("stage", ""), me["id"], (form.get("note") or "")[:500])
                 msg = f"Moved to {QA_STAGE_LABELS.get(form.get('stage', ''), form.get('stage'))}."
@@ -397,7 +438,7 @@ def mount_pa(app: FastAPI, w) -> None:
             return g
         agent, me = g
         if me["id"] != settings.owner_id:
-            return Response("Only the founder can message people from here.", status_code=403)
+            return w.oops("Only the founder can message people from here.")
         recipient = (form.get("recipient") or "").strip()
         purpose = (form.get("purpose") or "").strip()
         if not recipient or not purpose:
@@ -418,7 +459,7 @@ def mount_pa(app: FastAPI, w) -> None:
             return g
         agent, me = g
         if me["id"] != settings.owner_id:
-            return Response("Only the founder can approve outgoing messages.", status_code=403)
+            return w.oops("Only the founder can approve outgoing messages.")
         if action == "send":
             msg = agent.send_outbox(outbox_id, me["id"], body=form.get("body"))
         elif action == "reject":
@@ -630,7 +671,7 @@ def mount_pa(app: FastAPI, w) -> None:
             return g
         agent, me = g
         if me["id"] != settings.owner_id:
-            return Response("Only the founder can change settings.", status_code=403)
+            return w.oops("Only the founder can change settings.")
         try:
             msg = _save_section(agent, me, section, form)
         except (TeamError, ValueError) as exc:
@@ -769,7 +810,22 @@ def _actor(agent, actor: str) -> str:
     return user["name"] if user else actor
 
 
-def _event_text(e) -> str:
+FIELD_NAMES = {"due_at": "Due", "owner_id": "Owner", "status": "Status", "priority": "Priority", "title": "Title",
+               "stage": "Stage", "department": "Department", "description": "Details", "waiting_on": "Waiting on",
+               "related_person": "Person", "related_project": "Project", "next_action": "Next action", "value": "Value",
+               "follow_up_at": "Follow up", "kind": "Type", "verification": "Check"}
+SOURCES = {"manual": "added by hand", "email": "from an email", "whatsapp": "from WhatsApp", "qa": "found by QA checks",
+           "calendar": "from a meeting", "chat": "from the AI Assistant"}
+
+
+def _when_text(value) -> str:
+    try:
+        return datetime.fromisoformat(str(value)).strftime("%a %d %b %H:%M")
+    except ValueError:
+        return str(value)[:16]
+
+
+def _event_text(e, agent=None) -> str:
     if e["event"] == "note":
         return e["detail"]
     try:
@@ -778,16 +834,26 @@ def _event_text(e) -> str:
         return e["detail"]
     if not isinstance(data, dict):
         return str(data)
+    if e["event"] == "created":
+        what = KINDS.get(data.get("kind", ""), "Item")
+        src = SOURCES.get(data.get("source", ""), "")
+        return f"Added as {what}" + (f" ({src})" if src else "")
     parts = []
     for k, v in data.items():
-        if k in ("data", "fingerprint", "updated_at"):
+        if k in ("data", "fingerprint", "updated_at", "reminded", "overdue_alerted", "completed_at", "waiting_since"):
             continue
+        name = FIELD_NAMES.get(k, k.replace("_", " ").capitalize())
         if k == "status":
             v = STATUS_LABELS.get(v, v)
-        if k in ("due_at", "completed_at", "follow_up_at", "waiting_since") and v:
-            v = str(v)[:16].replace("T", " ")
-        parts.append(f"{k.replace('_', ' ')}: {v}")
-    return "; ".join(parts) or e["event"]
+        elif k == "stage":
+            v = LEAD_STAGE_LABELS.get(v) or QA_STAGE_LABELS.get(v, v)
+        elif k == "owner_id":
+            user = agent.store.user(v) if (agent and v) else None
+            v = user["name"] if user else ("nobody" if not v else v)
+        elif k in ("due_at", "follow_up_at"):
+            v = _when_text(v) if v else "none"
+        parts.append(f"{name} → {v}")
+    return "; ".join(parts) or e["event"].replace("_", " ")
 
 
 def _audit_detail(detail: str) -> str:
@@ -809,3 +875,12 @@ def _evidence(row) -> dict | None:
     m = re.search(r"run-(\d+)[\\/]+([a-z0-9-]+\.png)$", shot)
     return {**ev, "occurrences": data.get("occurrences", 1),
             "screenshot_url": f"/qa/evidence/{m.group(1)}/{m.group(2)}" if m else ""}
+
+
+def _same_site(referer: str, fallback: str) -> str:
+    """The page the person was on (path only), so quick actions return there."""
+    from urllib.parse import urlparse
+    u = urlparse(referer or "")
+    path = (u.path or "") + (f"?{u.query}" if u.query else "")
+    path = re.sub(r"[?&]msg=[^&]*", "", path).replace("?&", "?").rstrip("?")
+    return path if path.startswith("/") and not path.startswith("//") and path != "/login" else fallback

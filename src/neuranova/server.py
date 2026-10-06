@@ -100,7 +100,8 @@ def create_app(settings: Settings, agent_factory: Callable, store: Store | None 
 
     @app.get("/health")
     def health() -> dict:
-        return {"ok": True}
+        from . import __version__
+        return {"ok": True, "app": "neuranova-pa", "version": __version__}
 
     @app.get("/webhook")
     def verify(request: Request) -> Response:

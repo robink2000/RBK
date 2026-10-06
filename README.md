@@ -51,6 +51,13 @@ Or double-click `scripts\start.bat` / run `./scripts/start.sh`. Server and Whats
 
 The same assistant also answers on WhatsApp. Teammates get their own login and see only their own work; the founder's mailbox, drafts and reports stay private.
 
+### Handy shortcuts
+- **+ New** (top right of every page, or press **N**): type what needs doing in your own words, e.g. *"Call Ravi's parents tomorrow 3pm"*. The date is understood automatically.
+- **/** jumps to search.
+- **✓** next to any item marks it done. **→ Tomorrow** moves an overdue or today's item to tomorrow.
+- **Getting started** on the Dashboard shows what's left to connect, with a link to each step.
+- If an older copy is still running, the PA tells you and opens the new version on the next free address.
+
 ### How it decides what to do with a message
 Important emails and WhatsApp messages are read by the AI, which decides whether to **create**, **update**, **close** or **ignore**. "Ok 👍" never becomes a task. "I'll send it by Friday" becomes a **waiting for** item due Friday at 6 pm, and if Friday passes the PA tells you and drafts a polite follow-up for approval. It updates existing items instead of creating duplicates. Messages from people who aren't on your team are treated as information only, never as commands.
 
@@ -102,7 +109,7 @@ Everything else works without credentials. Without AI, briefings, alerts, the pi
 
 ## Test results
 
-- **138 automated tests** pass (`pytest`). They cover the data model, date parsing, communication analysis and dedupe, briefing ranking, proactive alerts, business and quality logic, reports, calendar, the AI provider layer (Claude and OpenAI), **real-browser QA runs** against a test site (Production safety, evidence, regressions, auto-verify), every web page for founder and member, permissions, Safe Mode, encrypted settings, the hashed password, and the email/WhatsApp/Todoist connectors with fakes.
+- **141 automated tests** pass (`pytest`). They cover the data model, date parsing, communication analysis and dedupe, briefing ranking, proactive alerts, business and quality logic, reports, calendar, the AI provider layer (Claude and OpenAI), **real-browser QA runs** against a test site (Production safety, evidence, regressions, auto-verify), every web page for founder and member, permissions, Safe Mode, encrypted settings, the hashed password, and the email/WhatsApp/Todoist connectors with fakes.
 - **Packaged-program smoke test** (`packaging/smoke_test.py`): starts the built program in a clean folder, completes the first-run page, signs in, opens every page, writes a report, creates a task, and confirms the password is in neither `.env` nor the log.
 - **Windows CI** (`.github/workflows/windows.yml`, on `windows-latest`): runs all tests on Windows, builds the program, runs the smoke test, builds the installer, **silently installs it, starts it, runs the smoke test against the installed copy and uninstalls it**, then publishes the installer and ZIP.
 

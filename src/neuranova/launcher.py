@@ -63,6 +63,18 @@ def port_busy(port: int) -> bool:
         return s.connect_ex(("127.0.0.1", port)) == 0
 
 
+def running_version(port: int) -> str | None:
+    """Version of the NeuraNova PA answering on this port; "" for an older NeuraNova; None for something else."""
+    try:
+        import httpx
+        data = httpx.get(f"http://127.0.0.1:{port}/health", timeout=2).json()
+    except Exception:
+        return None
+    if not isinstance(data, dict) or not data.get("ok"):
+        return None
+    return data.get("version", "") if data.get("app") == "neuranova-pa" or "version" not in data else ""
+
+
 def open_later(url: str, delay: float = 2.5) -> None:
     def go():
         time.sleep(delay)
@@ -165,10 +177,23 @@ def main(argv: list[str] | None = None) -> int:
     if rest:                                    # e.g. neuranova-pa report weekly
         return cli_main(rest)
     if port_busy(args.port):
-        print(f"{APP_NAME} is already running. Opening it in your browser.", flush=True)
-        if not args.no_browser:
-            webbrowser.open(f"http://localhost:{args.port}/")
-        return 0
+        from . import __version__
+        running = running_version(args.port)
+        if running == __version__ and not args.demo:
+            print(f"{APP_NAME} is already running. Opening it in your browser.", flush=True)
+            if not args.no_browser:
+                webbrowser.open(f"http://localhost:{args.port}/")
+            return 0
+        free = next((p for p in range(args.port + 1, args.port + 30) if not port_busy(p)), None)
+        what = "another copy of NeuraNova (an older version)" if running is not None else "another program"
+        print(f"\n  Note: {what} is using http://localhost:{args.port}.", flush=True)
+        if free is None:
+            print("  No free address nearby. Close the other copy (its black window) and start again.", flush=True)
+            return 1
+        print(f"  This version will open at http://localhost:{free} instead.\n"
+              f"  Tip: close the other copy's window, then start NeuraNova PA again to get back to :{args.port}.\n",
+              flush=True)
+        args.port = free
     if args.demo:
         return cli_main(["demo", "--port", str(args.port)] + (["--no-browser"] if args.no_browser else []))
     if not configured(home):

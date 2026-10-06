@@ -222,6 +222,18 @@ LOGIN = """{% extends "base" %}{% from "nav" import brand_logo, brand_wordmark w
 
 NAV = """{% macro brand_logo() %}<img src="/brand/logo" alt="{{ brand.name }} logo" width="40" height="40">{% endmacro %}
 {% macro brand_wordmark() %}{% if brand.name == 'NeuraNova' %}Neura<span class="nova">Nova</span>{% else %}{{ brand.name }}{% endif %}{% endmacro %}
+{% macro icon(name) %}{% set paths = {
+  'home': 'M3 11l9-8 9 8M5 10v10h5v-6h4v6h5V10',
+  'today': 'M8 2v4M16 2v4M3 9h18M5 5h14v16H5z',
+  'tasks': 'M10 6h10M10 12h10M10 18h10M4 6l1.2 1.2L7.5 5M4 12l1.2 1.2L7.5 11M4 18l1.2 1.2L7.5 17',
+  'business': 'M3 17l6-6 4 4 8-8M15 7h6v6',
+  'communications': 'M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-6.4A8 8 0 1 1 21 12z',
+  'qa': 'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3zM9 12l2 2 4-4',
+  'quality': 'M12 3l2.7 5.6 6.3.9-4.5 4.4 1 6.2L12 17l-5.6 3 1-6.2L3 9.5l6.3-.9L12 3z',
+  'reports': 'M7 3h7l5 5v13H7zM14 3v5h5M10 13h6M10 17h6',
+  'assistant': 'M12 3l1.8 4.6L18.5 9l-4.7 1.6L12 15l-1.8-4.4L5.5 9l4.7-1.4L12 3zM19 15l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8.8-2z',
+  'settings': 'M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1M15 4v4M9 10v4M17 16v4',
+  'plus': 'M12 5v14M5 12h14'} %}<svg class="ico" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="{{ paths.get(name, '') }}"/></svg>{% endmacro %}
 {% macro top(page, user, csrf, today, title='') %}
 {% set founder = user.id == owner_id %}
 {% set nav = [('home', '/', 'Dashboard', True), ('today', '/today', 'Today', True), ('tasks', '/tasks', 'Tasks', True),
@@ -233,10 +245,10 @@ NAV = """{% macro brand_logo() %}<img src="/brand/logo" alt="{{ brand.name }} lo
   <a class="brand" href="/" aria-label="{{ brand.name }} PA home">{{ brand_logo() }}
     <div><div class="brand-name">{{ brand_wordmark() }} <span class="pa-tag">PA</span></div><div class="brand-tag">Personal Assistant</div></div></a>
   <div class="nav-links">
-  {% for key, href, label, show in nav if show %}<a href="{{ href }}" class="{{ 'on' if page == key else '' }}" {{ 'aria-current=page' if page == key else '' }}>{{ label }}</a>{% endfor %}
+  {% for key, href, label, show in nav if show %}<a href="{{ href }}" class="{{ 'on' if page == key else '' }}" {{ 'aria-current=page' if page == key else '' }}>{{ icon(key) }}<span>{{ label }}</span></a>{% endfor %}
   </div>
   <div class="me">
-    <div><strong>{{ user.name }}</strong><div class="meta">{{ 'Founder' if founder else user.role|capitalize }}{% if safe_mode %} · <span title="Outgoing messages wait for approval">Safe Mode on</span>{% endif %}</div></div>
+    <div><strong>{{ user.name }}</strong><div class="meta">{{ 'Founder' if founder else user.role|capitalize }}{% if safe_mode %} · <span title="Outgoing messages wait for your approval">🛡 Safe Mode</span>{% endif %}</div></div>
     <form class="inline" method="post" action="/logout"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link" type="submit">Sign out</button></form>
   </div>
 </nav>
@@ -244,10 +256,45 @@ NAV = """{% macro brand_logo() %}<img src="/brand/logo" alt="{{ brand.name }} lo
   {% set titles = {'home': 'Dashboard', 'today': 'Today', 'tasks': 'Tasks', 'business': 'Business',
                    'communications': 'Communications', 'qa': 'Application QA', 'quality': 'Quality', 'reports': 'Reports',
                    'assistant': 'AI Assistant', 'settings': 'Settings', 'team': 'Team', 'integrations': 'Integrations'} %}
+  {% set helps = {'home': 'Your business at a glance: what needs attention now and how your goals are going.',
+                  'today': 'Everything that needs you today, most important first.',
+                  'tasks': 'Everything the PA tracks for you and the team. Type anything in plain words to add it.',
+                  'business': 'Leads, follow-ups, payments and conversions.',
+                  'communications': 'Messages waiting for your OK, and people waiting for your reply.',
+                  'qa': 'Automatic checks of the NeuraNova apps, and the problems they found.',
+                  'quality': 'Quality concerns, and patterns that keep coming back.',
+                  'reports': 'Your daily, weekly and monthly summaries.',
+                  'assistant': 'Ask anything about your business, or tell the PA what to do.',
+                  'settings': 'How the PA works for you. Changes save per section.',
+                  'team': 'People, invites and the shared task board.',
+                  'integrations': 'Connect email, WhatsApp, AI and more. Keys are stored encrypted.'} %}
   <div><h1>{{ title or titles.get(page, '') }}</h1>
-  <div class="sub">{{ today }}</div></div>
-  <form class="quick" method="get" action="/search" role="search"><input name="q" type="search" placeholder="Search tasks, people, leads…" aria-label="Search"></form>
+  <div class="sub">{{ today }}{% if helps.get(page) and not title %} · {{ helps[page] }}{% endif %}</div></div>
+  <div class="head-actions">
+    <form class="quick" method="get" action="/search" role="search"><input name="q" type="search" placeholder="Search…  ( / )" aria-label="Search" id="global-search"></form>
+    <details class="quickadd" id="quickadd"><summary class="btn primary-btn" title="Add something (N)">{{ icon('plus') }} New</summary>
+      <form method="post" action="/tasks/quick" class="quickadd-pop">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="back" class="here">
+        <label for="qa-text">What needs doing?</label>
+        <input id="qa-text" name="text" required maxlength="200" placeholder="e.g. Call Ravi's parents tomorrow 3pm" autocomplete="off">
+        <div class="quickadd-row"><select name="kind" aria-label="Type"><option value="task">Task</option><option value="follow_up">Follow-up</option><option value="waiting">Waiting for someone</option><option value="lead">Lead</option><option value="quality">Quality concern</option><option value="decision">Decision</option></select>
+        <button class="primary" type="submit">Add</button></div>
+        <div class="meta">Dates in your words work: "tomorrow 3pm", "by Friday", "month end".</div>
+      </form></details>
+  </div>
 </header>
+<script>
+document.addEventListener('keydown', function (e) {
+  var t = e.target, typing = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
+  if (typing || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key === '/') { e.preventDefault(); var s = document.getElementById('global-search'); if (s) s.focus(); }
+  if (e.key === 'n' || e.key === 'N') { var q = document.getElementById('quickadd'); if (q) { e.preventDefault(); q.open = true; document.getElementById('qa-text').focus(); } }
+  if (e.key === 'Escape') { var q2 = document.getElementById('quickadd'); if (q2) q2.open = false; }
+});
+document.addEventListener('click', function (e) { var q = document.getElementById('quickadd'); if (q && q.open && !q.contains(e.target)) q.open = false; });
+document.querySelectorAll('input.here').forEach(function (i) { i.value = location.pathname + location.search; });
+document.addEventListener('DOMContentLoaded', function () { document.querySelectorAll('.flash').forEach(function (f) { var x = document.createElement('button'); x.type = 'button'; x.className = 'flash-x'; x.setAttribute('aria-label', 'Dismiss'); x.textContent = '×'; x.onclick = function () { f.remove(); }; f.appendChild(x); }); });
+</script>
 {% endmacro %}
 
 {% macro task_row(t, me, members, csrf, back) %}
@@ -317,11 +364,13 @@ DASHBOARD = """{% extends "base" %}{% from "chart" import chart %}{% from "nav" 
 {% endif %}
 {% if b %}{{ briefing(b, True) }}{% endif %}
 {% if not is_owner %}{{ mytasks() }}{% endif %}
-{% if is_owner and setup and setup.connected < setup.total and setup_done %}
-<section class="card setup-nudge">
-  <div><h2 style="margin:0">Finish connecting your accounts</h2>
-    <div class="sub">{{ setup.connected }} of {{ setup.total }} connected{% if setup.missing %}. Still to do: {{ setup.missing|join(', ') }}{% endif %}.</div></div>
-  <a class="btn" href="/integrations" style="text-decoration:none">Open Integrations</a>
+{% set todo = checklist|rejectattr('done')|list %}
+{% if is_owner and setup_done and todo %}
+<section class="card getting-started">
+  <div class="gs-head"><h2 style="margin:0">Getting started</h2><span class="meta">{{ checklist|length - todo|length }} of {{ checklist|length }} done</span></div>
+  <div class="meter" style="margin:8px 0 12px"><span style="width:{{ ((checklist|length - todo|length) * 100 / checklist|length)|round|int }}%"></span></div>
+  <ul class="gs-list">{% for c in checklist %}<li class="{{ 'done' if c.done else '' }}"><span class="gs-dot">{{ '✓' if c.done else loop.index }}</span>
+    {% if c.done %}<span>{{ c.title }}</span>{% else %}<span><a href="{{ c.href }}">{{ c.title }}</a><span class="meta">{{ c.why }}</span></span>{% endif %}</li>{% endfor %}</ul>
 </section>
 {% endif %}
 <div class="tabs row">{% for d in [7, 30, 90] %}<a href="/?days={{ d }}" class="{{ 'on' if d == days else '' }}">{{ d }} days</a> {% endfor %}</div>
