@@ -113,7 +113,11 @@ def mount_dashboard(app: FastAPI, settings: Settings, agent_factory: Callable, s
         if "me" in ctx and "safe_mode" not in ctx:
             from .pa import prefs
             try:
-                ctx["safe_mode"] = prefs.safe_mode(store if store is not None else agent_factory().store)
+                st = store if store is not None else agent_factory().store
+                ctx["safe_mode"] = prefs.safe_mode(st)
+                if ctx["me"] and ctx["me"]["id"] == settings.owner_id:
+                    from .pa import updates
+                    ctx.setdefault("update", updates.latest(st))
             except Exception:
                 ctx["safe_mode"] = True
         return HTMLResponse(env.get_template(_template).render(**ctx), status_code=code,

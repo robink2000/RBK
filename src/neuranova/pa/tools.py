@@ -38,6 +38,8 @@ PA_TOOLS = [
         "department": N("string", description="One of: " + ", ".join(DEPARTMENTS)),
         "related_person": N("string"),
         "notes": N("string"),
+        "repeat": N("string", description="Only if it repeats, in words: 'every Friday', 'every weekday', "
+                                          "'every month on the 5th', 'every 2 weeks'"),
     }),
     T("update_item", "Update a work item by id: status, due, owner, priority, lead/QA stage, or add a note.", {
         "item_id": {"type": "integer"},
@@ -137,8 +139,11 @@ class PATools:
                     or (when == "no_date" and not r["due_at"])]
         return {"count": len(rows), "items": [_row(r, tz) for r in rows[:40]]}
 
-    def create_item(self, kind, title, due, owner, priority, department, related_person, notes):
+    def create_item(self, kind, title, due, owner, priority, department, related_person, notes, repeat=None):
+        from . import recurring
         owner_id = self._person(owner)["id"] if owner else None
+        rule = recurring.parse(repeat)[0] if repeat else None
+        extra = {"data": {"repeat": rule, "tz": self.settings.tz.key}} if rule else {}
         dupe = self._pa().similar_open(title, kind=kind, person=related_person or "", threshold=0.75)
         if dupe is not None:
             return {"already_exists": _row(dupe, self.settings.tz),
@@ -148,7 +153,10 @@ class PATools:
             priority=priority, department=department if department in DEPARTMENTS else "",
             related_person=related_person or "", description=notes or "", source="chat",
             status="waiting" if kind == "waiting" else "open",
-            stage="new" if kind in ("lead", "qa_issue") else "")
+            stage="new" if kind in ("lead", "qa_issue") else "", **extra)
+        if rule and not due:
+            first = recurring.first_due(rule, datetime.now(self.settings.tz), self.settings.working_hours.start)
+            self._pa().update_item(item_id, self._me()["id"], due_at=first)
         if owner_id and owner_id != self._me()["id"]:
             person = self.store.user(owner_id)
             self.agent.notify_user(person, f"📌 New from {self._me()['name']}: {title}" +

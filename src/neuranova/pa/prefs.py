@@ -29,6 +29,7 @@ DEFAULTS = {
     "notify_monthly": True, "notify_qa": True,
     "auto_draft_followups": True,  # draft follow-ups for overdue promises (they wait for approval)
     "setup_done": False, "setup_step": 1,
+    "lan_access": False,           # let phones on the same Wi-Fi open the console (applies after a restart)
 }
 
 

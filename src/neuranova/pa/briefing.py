@@ -11,6 +11,7 @@ from ..connectors.gmail import sender_name
 from ..db import row_dt
 from . import business, quality
 from .dates import bucket
+from .recurring import describe
 from .store import KINDS, PRIORITY_RANK, STATUS_LABELS, PAStore, data_of
 
 FOCUS = [
@@ -55,7 +56,7 @@ def entry(row, now: datetime, signals: list[str] | None = None) -> dict:
         "due": _when(due, now), "overdue": bool(due and due < now), "bucket": bucket(due, now),
         "who": row["waiting_on"] or row["related_person"] or row["contact_name"] or "",
         "next_action": row["next_action"] or data.get("blocked_reason", ""), "source": row["source"],
-        "link": f"/tasks/{row['id']}", "signals": signals or [],
+        "link": f"/tasks/{row['id']}", "signals": signals or [], "repeat": describe(data.get("repeat")),
     }
 
 
