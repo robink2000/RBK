@@ -208,7 +208,7 @@ details.advanced > summary { cursor: pointer; }
 LOGIN = """{% extends "base" %}{% from "nav" import brand_logo, brand_wordmark with context %}{% block body %}
 <div class="card login">
   <div class="brand" style="margin-bottom:12px">{{ brand_logo() }}<div><div class="brand-name">{{ brand_wordmark() }}</div><div class="brand-tag">{{ brand.tagline }}</div></div></div>
-  <p class="sub">Sign in to your console.</p>
+  <p class="sub">Sign in to your personal assistant.</p>
   {% if error %}<p class="over">{{ error }}</p>{% endif %}
   <form method="post" action="/login">
     <label for="em">Email</label>
@@ -741,7 +741,7 @@ env = Environment(
                        "join": JOIN, "link": LINK, "team": TEAM, "integrations": INTEGRATIONS, "return": RETURN}),
     autoescape=select_autoescape(default=True, default_for_string=True),
 )
-env.globals["brand"] = {"name": "NeuraNova", "tagline": "Operations console", "accent": "#6b1fa3",
+env.globals["brand"] = {"name": "NeuraNova", "tagline": "Personal Assistant", "accent": "#6b1fa3",
                         "accent_dark": "#a06ad9"}
 
 from .pa_templates import register as _register_pa  # noqa: E402

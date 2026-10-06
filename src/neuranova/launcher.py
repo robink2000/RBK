@@ -75,13 +75,14 @@ def open_later(url: str, delay: float = 2.5) -> None:
 
 FIRST_RUN = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Welcome to NeuraNova PA</title><link rel="icon" href="/logo">
-<style>body{margin:0;background:#f7f5fa;color:#1a1426;font:15px/1.5 "Segoe UI",system-ui,sans-serif}
-.strip{height:4px;background:linear-gradient(90deg,#ee6e1c,#a50f81 50%,#3683c2)}
-.card{max-width:440px;margin:8vh auto;background:#fff;border:1px solid rgba(26,20,38,.1);border-radius:12px;padding:24px}
-h1{font-size:20px;margin:8px 0}label{display:grid;gap:4px;margin:12px 0;font-weight:600}
-input{font:inherit;padding:8px;border:1px solid rgba(26,20,38,.15);border-radius:8px;background:#f7f5fa}
-button{font:inherit;background:#6b1fa3;color:#fff;border:0;border-radius:8px;padding:10px 16px;cursor:pointer;width:100%}
-.err{color:#d03b3b;font-weight:600}.sub{color:#4f4760;font-size:13px}img{width:48px;height:48px}</style></head>
+<style>body{margin:0;min-height:100vh;color:#1a1426;font:15px/1.5 "Segoe UI",system-ui,sans-serif;
+background:radial-gradient(600px 400px at 15% 20%,rgba(246,81,29,.35),transparent 60%),radial-gradient(600px 400px at 85% 80%,rgba(46,117,203,.35),transparent 60%),radial-gradient(500px 360px at 70% 15%,rgba(230,41,98,.3),transparent 60%),linear-gradient(180deg,#2b0a4d,#23105a 55%,#12306e)}
+.strip{height:4px;background:linear-gradient(120deg,#f6511d,#e62962 28%,#8a0b8f 52%,#5c0ba2 70%,#2e75cb)}
+.card{max-width:440px;margin:7vh auto;background:#fff;border-radius:20px;padding:28px;box-shadow:0 20px 60px rgba(0,0,0,.35);text-align:center}
+form{text-align:left}h1{font-size:22px;margin:8px 0;color:#3d0f70}label{display:grid;gap:4px;margin:12px 0;font-weight:600}
+input{font:inherit;padding:9px;border:1px solid rgba(26,20,38,.15);border-radius:10px;background:#f6f3fb}
+button{font:inherit;font-weight:600;background:linear-gradient(120deg,#f6511d,#e62962 28%,#8a0b8f 52%,#5c0ba2 70%,#2e75cb);color:#fff;border:0;border-radius:10px;padding:11px 16px;cursor:pointer;width:100%;box-shadow:0 4px 14px rgba(138,11,143,.3)}
+.err{color:#d03b3b;font-weight:600}.sub{color:#4f4760;font-size:13px}img{width:84px;height:84px}</style></head>
 <body><div class="strip"></div><div class="card"><img src="/logo" alt="NeuraNova logo">
 <h1>Welcome to NeuraNova PA</h1><p class="sub">Create your login. Everything stays on this computer; you'll connect email, WhatsApp and AI next, inside the app.</p>
 {error}<form method="post" action="/">

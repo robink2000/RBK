@@ -120,7 +120,7 @@ def load_settings(config_path: str | Path | None = None, env: dict[str, str] | N
         max_drafts_per_run=int(replies.get("max_drafts_per_run", 5)),
         brand={
             "name": brand.get("name", "NeuraNova"),
-            "tagline": brand.get("tagline", "Operations console"),
+            "tagline": brand.get("tagline", "Personal Assistant"),
             "accent": _color(brand.get("accent"), "#6b1fa3"),
             "accent_dark": _color(brand.get("accent_dark"), "#a06ad9"),
             "logo": brand.get("logo", ""),
