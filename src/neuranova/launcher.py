@@ -6,6 +6,7 @@ time a browser page asks for your login (no terminal questions), then the PA sta
     neuranova-pa            start (first-run page if needed)
     neuranova-pa --demo     sample data, nothing connected
     neuranova-pa --no-browser
+    neuranova-pa --no-tray    run in a console window instead of the system tray (Windows)
 """
 
 from __future__ import annotations
@@ -163,14 +164,98 @@ def first_run(home: Path, port: int, browser: bool) -> bool:
     return done.is_set()
 
 
+def windowed() -> bool:
+    """True for the packaged Windows program without a console window."""
+    return sys.stdout is None or sys.stderr is None
+
+
+def send_output_to_log(home: Path) -> Path:
+    """Without a console window, everything that would be printed goes to logs/neuranova-pa.log."""
+    logs = home / "logs"
+    logs.mkdir(exist_ok=True)
+    path = logs / "neuranova-pa.log"
+    if path.exists() and path.stat().st_size > 5_000_000:
+        path.replace(logs / "neuranova-pa.old.log")
+    stream = open(path, "a", encoding="utf-8", buffering=1)
+    sys.stdout = sys.stderr = stream
+    return path
+
+
+def tell(message: str, wait: bool = False) -> None:
+    """Print, and on the windowed Windows program also show it in a small message box."""
+    print(message, flush=True)
+    if sys.platform == "win32" and windowed_mode["on"]:
+        import ctypes
+
+        def box():
+            ctypes.windll.user32.MessageBoxW(0, message.strip(), APP_NAME, 0x40 | 0x1000)
+        if wait:
+            box()
+        else:
+            threading.Thread(target=box, daemon=True).start()
+
+
+windowed_mode = {"on": False}
+
+
+def run_tray(home: Path, port: int, work) -> int:
+    """Run `work` in the background and sit in the Windows system tray (next to the clock)."""
+    import pystray
+    from PIL import Image
+
+    logo = Image.open(Path(__file__).parent / "static" / "neuranova-logo.png").convert("RGBA").resize((64, 64))
+    result = {"code": 0}
+
+    def background():
+        try:
+            result["code"] = work() or 0
+        except SystemExit as exc:
+            result["code"] = exc.code if isinstance(exc.code, int) else 1
+            if exc.code not in (0, None):
+                tell(f"NeuraNova PA stopped: {exc.code}", wait=True)
+        except Exception as exc:
+            result["code"] = 1
+            tell(f"NeuraNova PA stopped because of an error:\n{exc}\n\nDetails are in {home / 'logs'}.", wait=True)
+        finally:
+            icon.stop()
+
+    def open_app(icon_, item_=None):
+        webbrowser.open(f"http://localhost:{port}/")
+
+    def open_folder(icon_, item_):
+        os.startfile(home)  # type: ignore[attr-defined]  # Windows only
+
+    def quit_app(icon_, item_):
+        icon_.stop()
+        os._exit(0)
+
+    icon = pystray.Icon("NeuraNova PA", logo, f"{APP_NAME} is running · http://localhost:{port}", menu=pystray.Menu(
+        pystray.MenuItem("Open NeuraNova PA", open_app, default=True),
+        pystray.MenuItem("Open my data folder", open_folder),
+        pystray.Menu.SEPARATOR,
+        pystray.MenuItem("Quit NeuraNova PA", quit_app)))
+    worker = threading.Thread(target=background, daemon=True)
+    worker.start()
+    try:
+        icon.run()
+    except Exception:
+        print("System tray unavailable; NeuraNova PA keeps running without the tray icon.", flush=True)
+        worker.join()
+    os._exit(result["code"])
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="neuranova-pa", description=APP_NAME)
     parser.add_argument("--demo", action="store_true", help="open with sample data")
     parser.add_argument("--no-browser", action="store_true")
+    parser.add_argument("--no-tray", action="store_true", help="run in this window instead of the system tray")
     parser.add_argument("--port", type=int, default=int(os.environ.get("WEBHOOK_PORT") or PORT))
     args, rest = parser.parse_known_args(argv)
     home = home_dir()
     prepare(home)
+    if windowed():
+        windowed_mode["on"] = True
+        send_output_to_log(home)
     print(f"{APP_NAME} · files in {home}", flush=True)
 
     from .cli import main as cli_main
@@ -186,26 +271,40 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         free = next((p for p in range(args.port + 1, args.port + 30) if not port_busy(p)), None)
         what = "another copy of NeuraNova (an older version)" if running is not None else "another program"
-        print(f"\n  Note: {what} is using http://localhost:{args.port}.", flush=True)
         if free is None:
-            print("  No free address nearby. Close the other copy (its black window) and start again.", flush=True)
+            tell(f"{what.capitalize()} is using http://localhost:{args.port} and no other address is free.\n"
+                 "Close the other copy, then start NeuraNova PA again.", wait=True)
             return 1
-        print(f"  This version will open at http://localhost:{free} instead.\n"
-              f"  Tip: close the other copy's window, then start NeuraNova PA again to get back to :{args.port}.\n",
-              flush=True)
+        tell(f"Note: {what} is using http://localhost:{args.port}.\n"
+             f"This version opens at http://localhost:{free} instead.\n"
+             f"Close the other copy and restart NeuraNova PA to get back to :{args.port}.")
         args.port = free
-    if args.demo:
-        return cli_main(["demo", "--port", str(args.port)] + (["--no-browser"] if args.no_browser else []))
-    if not configured(home):
-        if not first_run(home, args.port, not args.no_browser):
-            return 1
-    else:
-        if not args.no_browser:
-            open_later(f"http://localhost:{args.port}/", 4)
-    os.environ["WEBHOOK_PORT"] = str(args.port)
-    print(f"{APP_NAME} is running at http://localhost:{args.port} — keep this window open (Ctrl+C to stop).",
-          flush=True)
-    return cli_main(["run"])
+
+    port = args.port
+
+    def work() -> int:
+        if args.demo:
+            return cli_main(["demo", "--port", str(port)] + (["--no-browser"] if args.no_browser else []))
+        if not configured(home):
+            if not first_run(home, port, not args.no_browser):
+                return 1
+        elif not args.no_browser:
+            open_later(f"http://localhost:{port}/", 4)
+        os.environ["WEBHOOK_PORT"] = str(port)
+        print(f"{APP_NAME} is running at http://localhost:{port}"
+              + (" (in the system tray, next to the clock)." if windowed_mode["on"] else
+                 " — keep this window open (Ctrl+C to stop)."), flush=True)
+        return cli_main(["run"])
+
+    if sys.platform == "win32" and not args.no_tray:
+        try:
+            import pystray  # noqa: F401
+            from PIL import Image  # noqa: F401
+        except Exception:
+            pass
+        else:
+            return run_tray(home, port, work)
+    return work()
 
 
 if __name__ == "__main__":

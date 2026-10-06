@@ -7,7 +7,7 @@ datas = [(ROOT + "/neuranova.toml", "."), (ROOT + "/.env.example", ".")]
 binaries, hidden = [], []
 for pkg in ("neuranova", "uvicorn", "tzdata", "apscheduler", "anthropic", "openai", "icalendar",
             "recurring_ical_events", "x_wr_timezone", "certifi", "googleapiclient", "google_auth_oauthlib",
-            "msal", "multipart", "python_multipart", "playwright"):
+            "msal", "multipart", "python_multipart", "playwright", "pystray"):
     try:
         d, b, h = collect_all(pkg)
     except Exception:
@@ -21,9 +21,9 @@ datas = [(src, dst) for src, dst in datas
 hidden += collect_submodules("fastapi") + collect_submodules("starlette")
 
 a = Analysis([SPECPATH + "/neuranova_pa.py"], pathex=[ROOT + "/src"], binaries=binaries, datas=datas,
-             hiddenimports=hidden, excludes=["tkinter", "PIL", "pytest", "IPython", "matplotlib", "numpy"], noarchive=False)
+             hiddenimports=hidden, excludes=["tkinter", "pytest", "IPython", "matplotlib", "numpy"], noarchive=False)
 a.datas = [d for d in a.datas if "discovery_cache" not in d[0].replace("\\", "/") or "gmail.v1" in d[0]]
 pyz = PYZ(a.pure)
-exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="NeuraNova PA", console=True,
+exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="NeuraNova PA", console=False,
           icon=SPECPATH + "/neuranova.ico" if __import__("os").path.exists(SPECPATH + "/neuranova.ico") else None)
 coll = COLLECT(exe, a.binaries, a.datas, name="NeuraNova PA")

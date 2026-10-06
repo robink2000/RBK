@@ -68,6 +68,8 @@ def main(exe: str) -> int:
         log.close()
     env_text = (home / "app" / ".env").read_text(encoding="utf-8")
     log_text = (home / "smoke.log").read_text(encoding="utf-8", errors="replace")
+    for app_log in (home / "app" / "logs").glob("*.log"):
+        log_text += app_log.read_text(encoding="utf-8", errors="replace")
     assert PASSWORD not in env_text and PASSWORD not in log_text, "password stored or logged in plain text"
     assert "DASHBOARD_PASSWORD" in env_text and "scrypt$" in env_text
     assert (home / "app" / "data" / "neuranova.db").exists()
