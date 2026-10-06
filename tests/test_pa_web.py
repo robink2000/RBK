@@ -202,3 +202,62 @@ def test_launcher_reads_running_version(monkeypatch):
     assert launcher.running_version(1) == ""                                  # an older NeuraNova
     monkeypatch.setattr(httpx, "get", lambda *a, **k: (_ for _ in ()).throw(httpx.ConnectError("no")))
     assert launcher.running_version(1) is None                               # something else
+
+
+def test_export_backup_and_phone(tmp_path):
+    client, agent, _, _ = signed_in(tmp_path)
+    token = csrf_of(client.get("/tasks").text)
+    client.post("/tasks/quick", data={"csrf": token, "text": "=HYPERLINK(\"http://evil\") every Friday"})
+    client.post("/tasks", data={"csrf": token, "title": "Lead with notes", "kind": "lead", "notes": "line one\nline two"})
+    r = client.get("/export/tasks.csv")
+    assert r.status_code == 200 and "attachment" in r.headers["content-disposition"]
+    assert "'=HYPERLINK" in r.text and "every Friday" in r.text and '"line one\nline two"' in r.text.replace("\r\n", "\n")
+    assert "Lead with notes" in client.get("/export/leads.csv").text
+    assert client.get("/export/contacts.csv").status_code == 200
+    page = client.get("/settings?section=backup").text
+    assert "Backups" in page and "Back up now" in page          # in-memory test db: nothing on disk to back up
+    r = client.post("/settings/phone", data={"csrf": token, "lan_access": "on"}, follow_redirects=False)
+    assert "Phone access is on" in r.headers["location"].replace("%20", " ")
+    from neuranova.pa import prefs
+    assert prefs.get(agent.store)["lan_access"] is True
+    assert client.get("/backups/../../etc/passwd").status_code in (303, 404)
+
+
+def test_backup_zip_roundtrip(tmp_path, settings):
+    from dataclasses import replace
+    from neuranova.db import Store
+    from neuranova.pa import backup
+    s = replace(settings, db_path=tmp_path / "data" / "neuranova.db")
+    (tmp_path / "data").mkdir()
+    store = Store(s.db_path, s.workspace_id, s.owner_id)
+    store.pa.create_item("owner", kind="task", title="Keep me safe")
+    env = tmp_path / ".env"
+    env.write_text("DASHBOARD_SECRET=x\n")
+    path = backup.make(store, s, env_file=env)
+    assert path and backup.read_db(path.read_bytes()) and not backup.due(s)
+    import zipfile
+    with zipfile.ZipFile(path) as z:
+        assert {"data/neuranova.db", ".env", "RESTORE.txt"} <= set(z.namelist())
+        z.extract("data/neuranova.db", tmp_path / "restored")
+    restored = Store(tmp_path / "restored" / "data" / "neuranova.db", s.workspace_id, s.owner_id)
+    assert restored.pa.items()[0]["title"] == "Keep me safe"
+    assert [b["name"] for b in backup.listing(s, s.tz)] == [path.name]
+    assert backup.path_for(s, "../x.zip") is None
+
+
+def test_update_notice(tmp_path, monkeypatch):
+    client, agent, _, _ = signed_in(tmp_path)
+    from neuranova.pa import updates
+
+    class Http:
+        def __init__(self, version): self.version = version
+        def get(self, url):
+            v = self.version
+            return type("R", (), {"raise_for_status": lambda s: None, "json": lambda s: {
+                "html_url": "https://github.com/x/releases/latest",
+                "assets": [{"name": f"NeuraNova-PA-Setup-{v}.exe", "browser_download_url": f"https://dl/{v}.exe"}]}})()
+    monkeypatch.setenv("NEURANOVA_UPDATE_REPO", "x/y")
+    assert updates.check(agent.store, Http("99.0.0"))["version"] == "99.0.0"
+    assert "New version 99.0.0" in client.get("/today").text
+    assert updates.check(agent.store, Http("0.0.1")) is None
+    assert "New version" not in client.get("/today").text

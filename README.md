@@ -8,14 +8,14 @@ NeuraNova PA watches your email, WhatsApp, calendar, team work and NeuraNova app
 
 ## Install on Windows (no Python needed)
 
-1. Download **NeuraNova-PA-Setup-1.0.0.exe** from the repository's **Releases** page ("latest"). Builds from a branch are under **Actions → Windows build → Artifacts**.
+1. Download **NeuraNova-PA-Setup-1.2.0.exe** from the repository's **Releases** page ("latest"). Builds from a branch are under **Actions → Windows build → Artifacts**.
 2. Run it. It installs for your user only, so you don't need admin rights. You can tick:
    - **Create a desktop shortcut**
    - **Start NeuraNova PA automatically when I sign in to Windows** (recommended, so reminders and checks keep running)
-3. Open **NeuraNova PA** from the Start menu. A small window opens. Keep it open (you can minimise it): that window is the PA working. Your browser opens at **http://localhost:8080**.
+3. Open **NeuraNova PA** from the Start menu. Your browser opens at **http://localhost:8080**. The PA keeps working in the background, shown by the NeuraNova icon in the system tray next to the clock. Click the icon to reopen it, or right-click → **Quit**.
 4. **First time:** create your login in the browser (email and password). Then sign in and follow the **10-step setup**. Every step can be skipped and changed later under Settings.
 
-**Prefer no installer?** Download **NeuraNova-PA-Windows-1.0.0.zip**, unzip it anywhere and double-click **Start NeuraNova PA.bat**. Run **Add to Windows startup.bat** once to start it automatically when you sign in.
+**Prefer no installer?** Download **NeuraNova-PA-Windows-1.2.0.zip**, unzip it anywhere and double-click **Start NeuraNova PA.bat**. Run **Add to Windows startup.bat** once to start it automatically when you sign in.
 
 **Just want to look around first?** Start menu → **NeuraNova PA (sample data demo)**, or **Start demo (sample data).bat** in the ZIP. Sign in with `you@neuranova.demo` / `neuranova-demo`. It uses sample data only, kept apart from your real data.
 
@@ -57,6 +57,14 @@ The same assistant also answers on WhatsApp. Teammates get their own login and s
 - **✓** next to any item marks it done. **→ Tomorrow** moves an overdue or today's item to tomorrow.
 - **Getting started** on the Dashboard shows what's left to connect, with a link to each step.
 - If an older copy is still running, the PA tells you and opens the new version on the next free address.
+
+### Built for everyday use
+- **Repeating tasks:** write *"Publish the timetable every Friday"* or *"Send fee reminders every month on the 5th"*. When you tick one done, the next one appears.
+- **Backups every day** of everything (Settings → Backups), with one-click download. The newest 14 are kept.
+- **Download for Excel:** tasks (with your filters), leads and contacts.
+- **On your phone:** Settings → Phone access lets phones on the same Wi-Fi open the PA.
+- **Update notice:** when a newer version is published, a "New version" link appears in the menu.
+- **Runs quietly in the system tray** on Windows, with no window to keep open. The log is in `logs\neuranova-pa.log` if anything goes wrong.
 
 ### How it decides what to do with a message
 Important emails and WhatsApp messages are read by the AI, which decides whether to **create**, **update**, **close** or **ignore**. "Ok 👍" never becomes a task. "I'll send it by Friday" becomes a **waiting for** item due Friday at 6 pm, and if Friday passes the PA tells you and drafts a polite follow-up for approval. It updates existing items instead of creating duplicates. Messages from people who aren't on your team are treated as information only, never as commands.
@@ -109,7 +117,7 @@ Everything else works without credentials. Without AI, briefings, alerts, the pi
 
 ## Test results
 
-- **141 automated tests** pass (`pytest`). They cover the data model, date parsing, communication analysis and dedupe, briefing ranking, proactive alerts, business and quality logic, reports, calendar, the AI provider layer (Claude and OpenAI), **real-browser QA runs** against a test site (Production safety, evidence, regressions, auto-verify), every web page for founder and member, permissions, Safe Mode, encrypted settings, the hashed password, and the email/WhatsApp/Todoist connectors with fakes.
+- **156 automated tests** pass (`pytest`). They cover the data model, date parsing, communication analysis and dedupe, briefing ranking, proactive alerts, business and quality logic, reports, calendar, the AI provider layer (Claude and OpenAI), **real-browser QA runs** against a test site (Production safety, evidence, regressions, auto-verify), every web page for founder and member, permissions, Safe Mode, encrypted settings, the hashed password, and the email/WhatsApp/Todoist connectors with fakes.
 - **Packaged-program smoke test** (`packaging/smoke_test.py`): starts the built program in a clean folder, completes the first-run page, signs in, opens every page, writes a report, creates a task, and confirms the password is in neither `.env` nor the log.
 - **Windows CI** (`.github/workflows/windows.yml`, on `windows-latest`): runs all tests on Windows, builds the program, runs the smoke test, builds the installer, **silently installs it, starts it, runs the smoke test against the installed copy and uninstalls it**, then publishes the installer and ZIP.
 

@@ -247,6 +247,7 @@ NAV = """{% macro brand_logo() %}<img src="/brand/logo" alt="{{ brand.name }} lo
   <div class="nav-links">
   {% for key, href, label, show in nav if show %}<a href="{{ href }}" class="{{ 'on' if page == key else '' }}" {{ 'aria-current=page' if page == key else '' }}>{{ icon(key) }}<span>{{ label }}</span></a>{% endfor %}
   </div>
+  {% if update %}<a class="update-pill" href="{{ update.url or update.page }}" target="_blank" rel="noopener" title="Download, close NeuraNova PA, then run the installer. Your data is kept.">⬆ New version {{ update.version }}<span>Download update</span></a>{% endif %}
   <div class="me">
     <div><strong>{{ user.name }}</strong><div class="meta">{{ 'Founder' if founder else user.role|capitalize }}{% if safe_mode %} · <span title="Outgoing messages wait for your approval">🛡 Safe Mode</span>{% endif %}</div></div>
     <form class="inline" method="post" action="/logout"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link" type="submit">Sign out</button></form>
@@ -279,7 +280,7 @@ NAV = """{% macro brand_logo() %}<img src="/brand/logo" alt="{{ brand.name }} lo
         <input id="qa-text" name="text" required maxlength="200" placeholder="e.g. Call Ravi's parents tomorrow 3pm" autocomplete="off">
         <div class="quickadd-row"><select name="kind" aria-label="Type"><option value="task">Task</option><option value="follow_up">Follow-up</option><option value="waiting">Waiting for someone</option><option value="lead">Lead</option><option value="quality">Quality concern</option><option value="decision">Decision</option></select>
         <button class="primary" type="submit">Add</button></div>
-        <div class="meta">Dates in your words work: "tomorrow 3pm", "by Friday", "month end".</div>
+        <div class="meta">Write dates your way: "tomorrow 3pm", "by Friday", "month end". Repeats too: "every Friday", "every month on the 5th".</div>
       </form></details>
   </div>
 </header>

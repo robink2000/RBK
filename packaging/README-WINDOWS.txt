@@ -2,8 +2,10 @@ NeuraNova PA — Windows
 =====================
 
 START
-  Double-click "NeuraNova PA" (Start menu or desktop). A small black window opens — keep it open
-  (minimise it); that is the PA working. Your browser opens at http://localhost:8080.
+  Double-click "NeuraNova PA" (Start menu or desktop). Your browser opens at http://localhost:8080.
+  The PA keeps working quietly in the background: look for the NeuraNova flower icon in the
+  system tray, next to the clock (click the ^ arrow if you don't see it).
+  Click the icon to open the PA again; right-click it for "Open my data folder" and "Quit".
 
 FIRST TIME
   1. The browser asks you to create your login (email + password). Only a secure hash of the
@@ -17,7 +19,7 @@ TRY IT WITHOUT CONNECTING ANYTHING
   Sample data only, kept separate from your real data.
 
 STOP
-  Close the black window (or press Ctrl+C in it).
+  Right-click the tray icon → "Quit NeuraNova PA".
 
 RUN AUTOMATICALLY
   If you ticked "Start automatically when I sign in", the PA starts in the background each time you
@@ -37,5 +39,9 @@ APPLICATION QA (optional)
   Checks use Microsoft Edge, which every Windows PC has. Nothing else to install.
 
 PORT ALREADY IN USE?
-  Starting it twice just opens the running copy. If another program uses port 8080, start it from a
-  Command Prompt with:  "NeuraNova PA.exe" --port 8085
+  Starting it twice just opens the running copy. If an older copy or another program uses port
+  8080, the PA tells you and opens on the next free address (8081, 8082...).
+
+SOMETHING WRONG?
+  The log is in %LOCALAPPDATA%\NeuraNova PA\logs\neuranova-pa.log. Backups of all your data are in
+  %LOCALAPPDATA%\NeuraNova PA\data\backups (one a day; download them from Settings → Backups too).

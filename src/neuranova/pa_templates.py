@@ -197,6 +197,10 @@ h3.group-h.over { color: var(--critical); }
 .backlink { display: inline-block; margin-bottom: 10px; text-decoration: none; font-weight: 600; }
 .form-grid .check input, .fields .check input { width: auto !important; }
 .fields .form-grid { align-items: start; }
+.repeat { color: var(--nn-magenta); font-weight: 600; }
+.update-pill { display: grid; gap: 2px; text-decoration: none; background: var(--nn-grad-soft); border-radius: 12px; padding: 8px 12px;
+  font-weight: 650; color: var(--nn-title); font-size: 13px; }
+.update-pill span { font-weight: 400; color: var(--nn-magenta); text-decoration: underline; }
 .gs-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
 ul.gs-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); }
 ul.gs-list li { display: grid; grid-template-columns: 22px 1fr; column-gap: 10px; align-items: start; }
@@ -228,6 +232,7 @@ PA_MACROS = """
       {% if i.who and i.who != i.owner %}{% set _ = bits.append(i.who) %}{% endif %}
       {% if i.stage and i.kind == 'lead' %}{% set _ = bits.append(labels.lead_stages.get(i.stage, i.stage)) %}{% elif i.status and i.status not in ('Open',) %}{% set _ = bits.append(i.status) %}{% endif %}
       {{ bits|join(' · ') }}{% if i.due %}{{ ' · ' if bits }}<span class="{{ 'over' if i.overdue else 'due' }}">{% if i.kind == 'whatsapp' %}waiting {{ i.due }}{% elif i.overdue %}was due {{ i.due }}{% else %}due {{ i.due }}{% endif %}</span>{% endif %}
+      {% if i.repeat %} · <span class="repeat" title="Repeats">↻ {{ i.repeat }}</span>{% endif %}
       {% if i.next_action %} · next: {{ i.next_action }}{% endif %}</div>
   </div>
   {% if live and (i.overdue or i.bucket == 'today') %}<form class="inline" method="post" action="/tasks/{{ i.id }}"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="back" value="{{ back }}">
@@ -246,6 +251,7 @@ PA_MACROS = """
   <label>Priority<br><select name="priority">{% for p in labels.priorities %}<option {{ 'selected' if p == 'medium' else '' }}>{{ p }}</option>{% endfor %}</select></label>
   <label>Department<br><select name="department"><option value="">—</option>{% for d in labels.departments %}<option>{{ d }}</option>{% endfor %}</select></label>
   <label>Person / contact<br><input name="related_person" maxlength="120"></label>
+  <label>Repeats<br><select name="repeat">{% for k, v in labels.repeats %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></label>
   {% if kind == 'quality' %}<label>Category<br><select name="category">{% for c in labels.quality %}<option>{{ c }}</option>{% endfor %}</select></label>{% endif %}
   {% if kind == 'lead' %}<label>Value (₹)<br><input name="value" inputmode="decimal" maxlength="20"></label>{% endif %}
   <button class="primary" type="submit">{{ title }}</button>
@@ -391,7 +397,7 @@ TASKS = """{% extends "base" %}{% from "nav" import top with context %}{% from "
 {{ flash(msg) }}
 <section class="card quickbar" id="new">
   <form method="post" action="/tasks/quick" class="quickbar-form"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="back" value="/tasks">
-    <input name="text" required maxlength="200" placeholder="Add something… e.g. Send fee structure to Mr. Kumar by Friday" aria-label="New item" autocomplete="off">
+    <input name="text" required maxlength="200" placeholder="Add something… e.g. Send fee structure to Mr. Kumar by Friday · Publish timetable every Friday" aria-label="New item" autocomplete="off">
     <select name="kind" aria-label="Type">{% for k, v in labels.kinds.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select>
     <button class="primary" type="submit">Add</button></form>
   <details style="margin-top:8px"><summary>Add with owner, priority and more details</summary><div style="margin-top:10px">{{ new_item(members, csrf, '/tasks') }}</div></details>
@@ -406,7 +412,8 @@ TASKS = """{% extends "base" %}{% from "nav" import top with context %}{% from "
     <label>Search<input name="q" value="{{ f.q }}"></label>
     <button type="submit">Filter</button>{% if f.kind or f.owner or f.department or f.when or f.q or f.status != 'active' %} <a href="/tasks">Clear</a>{% endif %}
   </form>
-  <p class="meta" style="margin:10px 0 0">{{ items|length }} item{{ 's' if items|length != 1 }} · tick ✓ when done</p>
+  <p class="meta" style="margin:10px 0 0">{{ items|length }} item{{ 's' if items|length != 1 }} · tick ✓ when done ·
+    <a href="/export/tasks.csv?kind={{ f.kind|urlencode }}&status={{ f.status|urlencode }}&owner={{ f.owner|urlencode }}&department={{ f.department|urlencode }}&q={{ f.q|urlencode }}">Download for Excel</a></p>
   {% set groups = [('overdue', 'Overdue'), ('today', 'Today'), ('tomorrow', 'Tomorrow'), ('this_week', 'This week'), ('later', 'Later'), ('none', 'No date')] %}
   {% for key, label in groups %}{% set rows = items|selectattr('bucket', 'equalto', key)|list %}{% if rows %}
   <h3 class="group-h {{ 'over' if key == 'overdue' else '' }}">{{ label }} <span class="meta">({{ rows|length }})</span></h3>
@@ -429,7 +436,7 @@ TASK = """{% extends "base" %}{% from "nav" import top with context %}{% from "p
 <section class="card">
   <h2>{{ i.title }}</h2>
   <div class="meta"><span class="k">{{ i.kind_label }}</span>{{ i.status }}{% if i.stage %} · {{ (labels.lead_stages if i.kind == 'lead' else labels.qa_stages).get(i.stage, i.stage) }}{% endif %}
-    · {{ i.owner or 'no owner' }}{% if i.due %} · <span class="{{ 'over' if i.overdue else '' }}">due {{ i.due }}</span>{% endif %} · created {{ i.created }} · source {{ i.source or 'manual' }}</div>
+    · {{ i.owner or 'no owner' }}{% if i.due %} · <span class="{{ 'over' if i.overdue else '' }}">due {{ i.due }}</span>{% endif %} · created {{ i.created }} · source {{ i.source or 'manual' }}{% if i.repeat %} · <span class="repeat">↻ repeats {{ i.repeat }}</span>{% endif %}</div>
   {% if i.description %}<p style="white-space:pre-wrap">{{ i.description }}</p>{% endif %}
   {% if contact %}<p class="meta">Contact: {{ contact.name }}{% if contact.phone %} · {{ contact.phone }}{% endif %}{% if contact.email %} · {{ contact.email }}{% endif %}{% if contact.role %} · {{ contact.role }}{% endif %}</p>{% endif %}
   {% if i.can_change %}
@@ -464,6 +471,8 @@ TASK = """{% extends "base" %}{% from "nav" import top with context %}{% from "p
       <label>Status<select name="status">{% for k, v in labels.statuses.items() %}<option value="{{ k }}" {{ 'selected' if v == i.status else '' }}>{{ v }}</option>{% endfor %}</select></label>
       <label>Priority<select name="priority">{% for p in labels.priorities %}<option {{ 'selected' if p == i.priority else '' }}>{{ p }}</option>{% endfor %}</select></label>
       <label>Department<select name="department"><option value="">—</option>{% for d in labels.departments %}<option {{ 'selected' if d == i.department else '' }}>{{ d }}</option>{% endfor %}</select></label>
+      <label>Repeats<select name="repeat">{% set cur = i.data.repeat or '' %}{% for k, v in labels.repeats %}<option value="{{ k }}" {{ 'selected' if k == cur else '' }}>{{ v }}</option>{% endfor %}
+        {% if cur and cur not in labels.repeats|map('first')|list %}<option value="{{ cur }}" selected>{{ i.repeat|capitalize }}</option>{% endif %}</select></label>
       <div><label>{{ 'Change due date' if i.due else 'Due date' }} <small>{% if i.due %}(now {{ i.due }}){% endif %}</small><input name="due" placeholder="tomorrow 3pm, Friday, 12 Oct"></label>
         {% if i.due %}<label class="check" style="margin-top:4px"><input type="checkbox" name="clear_due"> no due date</label>{% endif %}</div>
     </div>
@@ -518,6 +527,7 @@ BUSINESS = """{% extends "base" %}{% from "nav" import top with context %}{% fro
 <h2>Pipeline</h2>
 <div class="cols row">{% for key, label, rows in stages %}<div class="col"><h3>{{ label }} · {{ rows|length }}</h3>
   <ul class="list">{% for i in rows[:12] %}<li><a class="item-title" href="{{ i.link }}">{{ i.title }}</a><div class="meta">{{ i.who or i.owner }}{% if i.due %} · {{ i.due }}{% endif %}{% if i.value %} · ₹{{ '{:,.0f}'.format(i.value) }}{% endif %}</div></li>{% else %}<li class="empty">—</li>{% endfor %}</ul></div>{% endfor %}</div>
+<p class="meta"><a href="/export/leads.csv">Download all leads for Excel</a></p>
 <section class="card" id="newlead"><h2>Add a lead</h2>{{ new_item(members, csrf, '/business', 'lead', 'Add lead', False) }}</section>
 <section class="card" id="events"><h2>Log progress</h2>
   <form class="event-form" method="post" action="/events"><input type="hidden" name="csrf" value="{{ csrf }}">
@@ -572,7 +582,7 @@ COMMUNICATIONS = """{% extends "base" %}{% from "nav" import top with context %}
   <div class="scroll"><table><tr><th>When</th><th>From</th><th>Subject</th><th>Type</th><th></th></tr>
   {% for e in emails %}<tr><td class="meta" style="white-space:nowrap">{{ e.at }}</td><td>{{ e.from }}</td><td>{{ e.subject }}<div class="meta">{{ e.summary }}</div></td><td>{{ e.category or '' }}{% if e.priority == 'high' %} · high{% endif %}</td><td>{{ '✓ replied' if e.replied else '' }}</td></tr>
   {% else %}<tr><td colspan="5" class="empty">No emails yet. Connect your mailbox under Settings → Integrations.</td></tr>{% endfor %}</table></div></section>
-<section class="card" id="contacts"><h2>Contacts ({{ contacts|length }})</h2>
+<section class="card" id="contacts"><h2>Contacts ({{ contacts|length }}) <a class="meta" style="font-weight:400" href="/export/contacts.csv">Download</a></h2>
   <p class="sub">People the PA has met through WhatsApp and email. Setting the role (parent, teacher…) helps it judge what matters.</p>
   {% for c in contacts[:100] %}<details><summary><strong>{{ c.name or c.phone or c.email }}</strong> <span class="meta">{{ c.role }}{% if c.organization %} · {{ c.organization }}{% endif %}</span></summary>
     <form method="post" action="/contacts/{{ c.id }}" class="form-grid" style="margin:8px 0 12px"><input type="hidden" name="csrf" value="{{ csrf }}">
@@ -759,8 +769,21 @@ expect-url /live">{{ qa_cfg.workflows }}</textarea>
     <label class="check"><input type="checkbox" name="trust_whatsapp_replies" {{ 'checked' if prefs.trust_whatsapp_replies else '' }}> Send routine WhatsApp replies automatically</label></fieldset>
   <label>To turn Safe Mode off, type TURN OFF<input name="confirm" autocomplete="off"></label>
   <p class="hint">Also protecting you: passwords hashed (scrypt), integration keys encrypted at rest, secrets never written to logs, sign-in rate-limited, every form CSRF-protected, Production QA is read-only.</p>
+{% elif section == 'backup' %}
+  <h2>Backups</h2>
+  <p class="hint">Every day the PA saves a copy of all your data (tasks, leads, history, settings and the key that unlocks your connected accounts). The newest 14 are kept in <code>{{ backup_folder }}</code>. Download one now and then and keep it somewhere safe, e.g. Google Drive.</p>
+  <div class="scroll"><table><tr><th>Backup</th><th>Made</th><th>Size</th><th></th></tr>
+  {% for b in backups %}<tr><td>{{ b.name }}</td><td>{{ b.when }}</td><td>{{ b.size }}</td><td><a href="/backups/{{ b.name }}">Download</a></td></tr>
+  {% else %}<tr><td colspan="4" class="empty">No backups yet. The first one is made a few minutes after start, or press the button.</td></tr>{% endfor %}</table></div>
+  <details><summary>How to restore a backup</summary><ol class="steps"><li>Close NeuraNova PA.</li><li>Open the PA's folder (Start menu → "Open NeuraNova PA data folder").</li><li>Unzip the backup there and replace the files when asked.</li><li>Start NeuraNova PA again.</li></ol></details>
+{% elif section == 'phone' %}
+  <h2>Phone access</h2>
+  <p class="hint">Open the PA on your phone while you're on the same Wi-Fi as this computer. You sign in with the same email and password.</p>
+  <label class="check"><input type="checkbox" name="lan_access" {{ 'checked' if prefs.lan_access else '' }}> Allow phones and other computers on my Wi-Fi to open NeuraNova PA</label>
+  {% if lan_url %}<p>On your phone, open: <strong style="font-size:18px">{{ lan_url }}</strong></p>{% else %}<p class="hint">This computer isn't on a network right now.</p>{% endif %}
+  <p class="hint">Takes effect after NeuraNova PA restarts. Use it only on your own office or home Wi-Fi (not public Wi-Fi). If Windows asks whether to allow network access, choose <em>Private networks</em>. To use it away from the office, host the PA on a server (see README).</p>
 {% endif %}
-  <div class="actions"><button class="primary" type="submit">Save</button></div>
+  <div class="actions"><button class="primary" type="submit">{{ 'Back up now' if section == 'backup' else 'Save' }}</button></div>
 </form>
 {% endif %}
 </section></div>

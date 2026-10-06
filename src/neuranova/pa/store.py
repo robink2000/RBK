@@ -285,6 +285,9 @@ class PAStore:
             if not changes:
                 self.conn.execute("UPDATE items SET updated_at = ? WHERE id = ?", (now_iso(), item_id))
         self.conn.commit()
+        if changes.get("status") in ("closed", "verified") and current["status"] in ACTIVE:
+            from .recurring import follow_on
+            follow_on(self, self.item(item_id), actor)
         return True
 
     def item(self, item_id: int) -> sqlite3.Row | None:

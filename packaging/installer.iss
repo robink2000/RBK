@@ -24,6 +24,8 @@ UninstallDisplayIcon={app}\NeuraNova PA.exe
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
+CloseApplications=yes
+RestartApplications=no
 ArchitecturesInstallIn64BitMode=x64compatible
 
 [Tasks]

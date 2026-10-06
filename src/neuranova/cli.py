@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from datetime import datetime, timedelta
 from pathlib import Path
 import logging
 import sys
@@ -153,9 +154,31 @@ def run_forever(settings: Settings) -> None:
     sched.add_job(job("weekly_report"), "cron", day_of_week=settings.weekly_report_day,
                   hour=settings.weekly_report_time.hour, minute=settings.weekly_report_time.minute,
                   id="weekly", max_instances=1, coalesce=True)
+    def backup_if_due():
+        try:
+            from .pa import backup
+            if backup.due(settings):
+                backup.make(Store(settings.db_path, settings.workspace_id, settings.owner_id), settings)
+        except Exception:
+            log.exception("Backup failed")
+
+    def update_check():
+        try:
+            from .pa import updates
+            updates.check(Store(settings.db_path, settings.workspace_id, settings.owner_id))
+        except Exception:
+            log.exception("Update check failed")
+
+    sched.add_job(update_check, "interval", hours=12, id="updates", max_instances=1, coalesce=True,
+                  next_run_time=datetime.now(settings.tz) + timedelta(minutes=1))
+    sched.add_job(backup_if_due, "interval", hours=1, id="backup", max_instances=1, coalesce=True,
+                  next_run_time=datetime.now(settings.tz) + timedelta(minutes=2))
+    # first inbox check right away, in the background, so the console opens without waiting for the mailbox
+    sched.get_job("inbox").modify(next_run_time=datetime.now(settings.tz) + timedelta(seconds=5))
     log.info("NeuraNova agent running. Morning brief at %s (%s). Ctrl+C to stop.",
              settings.morning_brief.strftime("%H:%M"), settings.tz.key)
-    job("check_inbox")()
+    if not web:
+        job("check_inbox")()
     sched.start()
     if web:
         import uvicorn
@@ -163,7 +186,7 @@ def run_forever(settings: Settings) -> None:
         from .server import create_app
 
         port = int(settings.secret("WEBHOOK_PORT") or 8080)
-        host = settings.secret("WEB_HOST") or "127.0.0.1"
+        host = settings.secret("WEB_HOST") or ("0.0.0.0" if prefs.get(_store).get("lan_access") else "127.0.0.1")
         log.info("Web server on %s:%s (webhook: %s, dashboard: %s)", host, port,
                  "on" if webhook else "off", "on" if dashboard else "off")
         uvicorn.run(create_app(settings, lambda: build_agent(settings)), host=host, port=port,

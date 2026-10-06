@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Resp
 from . import integrations as integ
 from .connectors.gmail import sender_name
 from .db import row_dt
-from .pa import briefing, business, prefs, qa, quality
+from .pa import briefing, business, prefs, qa, quality, recurring
 from .pa.dates import parse_deadline
 from .pa.reports import TITLES as REPORT_TITLES
 from .pa.store import (CONTACT_ROLES, DEPARTMENTS, KINDS, LEAD_STAGE_LABELS, LEAD_STAGES, PRIORITIES,
@@ -34,7 +34,8 @@ SETUP_STEPS = [
 SETTINGS_SECTIONS = [
     ("general", "General"), ("apps", "NeuraNova applications"), ("accounts", "Test accounts"), ("ai", "AI"),
     ("integrations", "Integrations"), ("notifications", "Notifications"), ("scheduler", "Scheduler"),
-    ("security", "Security"), ("people", "People"), ("audit", "Audit log"),
+    ("security", "Security"), ("phone", "Phone access"), ("backup", "Backups"), ("people", "People"),
+    ("audit", "Audit log"),
 ]
 _qa_running: dict[str, bool] = {}
 
@@ -218,15 +219,24 @@ def mount_pa(app: FastAPI, w) -> None:
         dupe = agent.pa.similar_open(text, kind=kind, threshold=0.8)
         if dupe is not None:
             return w.back(f"/tasks/{dupe['id']}", f"This is already open as #{dupe['id']}, so it wasn't added twice.")
-        due = parse_deadline(text, tz_now(), end_of_day=settings.working_hours.end)
+        rule, title = recurring.parse(text)
+        due = parse_deadline(title if rule else text, tz_now(), end_of_day=settings.working_hours.end)
         extra: dict = {}
+        if rule:
+            at = due.astimezone(settings.tz).time() if due and due.astimezone(settings.tz).time() != settings.working_hours.end \
+                else settings.working_hours.start
+            due = recurring.first_due(rule, tz_now(), at)
+            extra["data"] = {"repeat": rule, "tz": settings.tz.key}
+            text = title
         if kind == "waiting":
-            extra = {"status": "waiting", "waiting_since": datetime.now(timezone.utc)}
+            extra.update(status="waiting", waiting_since=datetime.now(timezone.utc))
         elif kind in ("lead", "qa_issue"):
-            extra = {"stage": "new"}
+            extra["stage"] = "new"
         item_id = agent.pa.create_item(me["id"], kind=kind, title=text, due_at=due, source="manual",
                                        owner_id=me["id"], **extra)
         when = f", due {due.astimezone(settings.tz):%a %d %b %H:%M}" if due else ""
+        if rule:
+            when += f", repeats {recurring.describe(rule)}"
         return w.back(back_to, f"Added #{item_id}{when}. Open it to add details.")
 
     @app.post("/tasks")
@@ -244,16 +254,21 @@ def mount_pa(app: FastAPI, w) -> None:
             due = due_from(form.get("due", ""))
         except TeamError as exc:
             return w.back("/tasks", str(exc))
+        extra: dict = {}
         owner_id = form.get("owner") or None
         if owner_id and agent.store.user(owner_id) is None:
             owner_id = None
+        repeat = form.get("repeat") if form.get("repeat") in dict(recurring.CHOICES) and form.get("repeat") else None
+        if repeat:
+            extra["data"] = {**extra.get("data", {}), "repeat": repeat, "tz": settings.tz.key}
+            if due is None:
+                due = recurring.first_due(repeat, tz_now(), settings.working_hours.start)
         dupe = agent.pa.similar_open(title, kind=kind, threshold=0.8)
         if dupe is not None and form.get("force") != "1":
             return w.back(f"/tasks/{dupe['id']}", f"This looks like #{dupe['id']}, which is already open. "
                                                   "It wasn't duplicated; update it here instead.")
-        extra: dict = {}
         if kind == "quality" and form.get("category") in QUALITY_CATEGORIES:
-            extra["data"] = {"category": form["category"]}
+            extra["data"] = {**extra.get("data", {}), "category": form["category"]}
         if kind == "lead" and (form.get("value") or "").strip():
             try:
                 extra["value"] = float(form["value"].replace(",", ""))
@@ -328,8 +343,17 @@ def mount_pa(app: FastAPI, w) -> None:
                             fields["data"] = data
                 if row["kind"] == "lead" and form.get("value", "").strip():
                     fields["value"] = float(form["value"].replace(",", ""))
+                if "repeat" in form:
+                    data = fields.get("data") or data_of(row)
+                    rule = form.get("repeat") or ""
+                    if rule != (data.get("repeat") or "") and (not rule or rule in dict(recurring.CHOICES) or re.fullmatch(r"(weekly:[0-6]|monthly:\d{1,2})", rule)):
+                        if rule:
+                            data.update(repeat=rule, tz=settings.tz.key)
+                        else:
+                            data.pop("repeat", None)
+                        fields["data"] = data
                 if row["kind"] == "quality" and form.get("category") in QUALITY_CATEGORIES:
-                    data = data_of(row)
+                    data = fields.get("data") or data_of(row)
                     data["category"] = form["category"]
                     fields["data"] = data
                 agent.pa.update_item(item_id, me["id"], note=(form.get("note") or "").strip()[:1000], **fields)
@@ -637,6 +661,58 @@ def mount_pa(app: FastAPI, w) -> None:
                   for r in agent.store.search_emails(q, 20)] if q and is_owner else []
         return render("search", agent, me, csrf, request, q=q, items=items, contacts=contacts, emails=emails)
 
+    @app.get("/export/{what}.csv")
+    def export_csv(request: Request, what: str, kind: str = "", status: str = "active", owner: str = "",
+                   department: str = "", q: str = ""):
+        g = signed_in(request, owner=(what == "contacts"))
+        if isinstance(g, Response):
+            return g
+        agent, me, csrf = g
+        import csv
+        import io
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        out = type("Out", (), {"writerow": staticmethod(lambda row: writer.writerow([_cell(c) for c in row]))})
+        tz = settings.tz
+
+        def when(v):
+            return row_dt(v).astimezone(tz).strftime("%Y-%m-%d %H:%M") if v else ""
+
+        if what in ("tasks", "leads"):
+            st = {"active": "active", "all": None, "closed": ("closed", "verified")}.get(status, status if status in STATUSES else "active")
+            rows = agent.pa.items(kind="lead" if what == "leads" else (kind or None), status=None if what == "leads" else st,
+                                  owner_id=(me["id"] if owner == "me" else owner or None), department=department or None,
+                                  search=q, limit=5000)
+            out.writerow(["ID", "Type", "Title", "Status", "Stage", "Priority", "Owner", "Person", "Department", "Due",
+                          "Value", "Repeats", "Created", "Completed", "Details"])
+            for r in rows:
+                out.writerow([r["id"], KINDS.get(r["kind"], r["kind"]), r["title"], STATUS_LABELS.get(r["status"], r["status"]),
+                              LEAD_STAGE_LABELS.get(r["stage"]) or QA_STAGE_LABELS.get(r["stage"], r["stage"] or ""),
+                              r["priority"], r["owner_name"] or "", r["waiting_on"] or r["related_person"] or r["contact_name"] or "",
+                              r["department"], when(r["due_at"]), "" if r["value"] is None else r["value"],
+                              recurring.describe(data_of(r).get("repeat")), when(r["created_at"]), when(r["completed_at"]),
+                              r["description"]])
+        elif what == "contacts":
+            out.writerow(["Name", "Phone", "Email", "Organisation", "Role", "Notes"])
+            for c in agent.pa.contacts(limit=10000):
+                out.writerow([c["name"], c["phone"], c["email"], c["organization"], c["role"], c["notes"]])
+        else:
+            return Response(status_code=404)
+        name = f"neuranova-{what}-{datetime.now(tz):%Y%m%d}.csv"
+        return Response("\ufeff" + buf.getvalue(), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="{name}"', "Cache-Control": "no-store"})
+
+    @app.get("/backups/{name}")
+    def backup_download(request: Request, name: str):
+        g = signed_in(request, owner=True)
+        if isinstance(g, Response):
+            return g
+        from .pa import backup
+        path = backup.path_for(settings, name)
+        if path is None:
+            return w.back("/settings?section=backup", "That backup isn't there any more.")
+        return FileResponse(path, media_type="application/zip", filename=name)
+
     # --- Settings ---------------------------------------------------------------------------------------------------------
 
     @app.get("/settings")
@@ -657,6 +733,14 @@ def mount_pa(app: FastAPI, w) -> None:
                "roles": qa.ROLES, "envs": qa.ENVIRONMENTS, "ai": integ.ai_choice(settings, agent.store)}
         if section == "ai":
             ctx["cards"] = {c["name"]: c for c in integ.view(settings, agent.store, w.base_url(request))}
+        if section == "backup":
+            from .pa import backup
+            ctx["backups"] = backup.listing(settings, settings.tz)
+            ctx["backup_folder"] = str(backup.folder(settings) or "")
+        if section == "phone":
+            ip = _lan_ip()
+            port = int(settings.secret("WEBHOOK_PORT") or 8080)
+            ctx["lan_url"] = f"http://{ip}:{port}" if ip else ""
         if section == "audit":
             rows = agent.store.recent_activity(300)
             ctx["audit"] = [{"at": row_dt(a["at"]).astimezone(settings.tz).strftime("%d %b %H:%M"),
@@ -777,6 +861,15 @@ def mount_pa(app: FastAPI, w) -> None:
                     if not ok:
                         raise ValueError(f"{integ.BY_NAME[key].title}: {message}")
             return ""
+        if key == "backup":
+            from .pa import backup
+            path = backup.make(store, settings)
+            return f"Backup saved: {path.name}" if path else "Backups need the database on disk."
+        if key == "phone":
+            on = bool(form.get("lan_access"))
+            prefs.save(store, {"lan_access": on}, me["id"])
+            return ("Phone access is on. Restart NeuraNova PA once, then open the address below on your phone "
+                    "(same Wi-Fi)." if on else "Phone access is off after the next restart.")
         if key == "review":
             return ""
         raise ValueError("Unknown settings section.")
@@ -793,7 +886,7 @@ def mount_pa(app: FastAPI, w) -> None:
 
 # --- helpers ---------------------------------------------------------------------------------------------------
 
-LABELS = {"kinds": KINDS, "statuses": STATUS_LABELS, "priorities": PRIORITIES, "departments": DEPARTMENTS,
+LABELS = {"repeats": recurring.CHOICES, "kinds": KINDS, "statuses": STATUS_LABELS, "priorities": PRIORITIES, "departments": DEPARTMENTS,
           "lead_stages": LEAD_STAGE_LABELS, "qa_stages": QA_STAGE_LABELS, "quality": QUALITY_CATEGORIES,
           "focus": dict(briefing.FOCUS)}
 
@@ -884,3 +977,21 @@ def _same_site(referer: str, fallback: str) -> str:
     path = (u.path or "") + (f"?{u.query}" if u.query else "")
     path = re.sub(r"[?&]msg=[^&]*", "", path).replace("?&", "?").rstrip("?")
     return path if path.startswith("/") and not path.startswith("//") and path != "/login" else fallback
+
+
+def _lan_ip() -> str:
+    """This computer's address on the local network (no traffic is sent)."""
+    import socket
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("10.255.255.255", 1))
+            ip = sock.getsockname()[0]
+        return "" if ip.startswith("127.") else ip
+    except OSError:
+        return ""
+
+
+def _cell(value) -> str:
+    """Spreadsheet safety: text starting with = + - @ is shown as text, never run as a formula."""
+    text = "" if value is None else str(value)
+    return "'" + text if text[:1] in ("=", "+", "-", "@", "\t", "\r") else text
