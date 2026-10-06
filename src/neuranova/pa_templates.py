@@ -57,13 +57,13 @@ ol.next li .meta { display: block; }
 textarea.body { width: 100%; min-height: 110px; font: inherit; color: var(--ink); background: var(--page); border: 1px solid var(--border); border-radius: 8px; padding: 8px; }
 /* ===== NeuraNova theme: colours taken from the NeuraNova logo petals ===== */
 :root {
-  --nn-orange: #f6511d; --nn-red: #fe2c22; --nn-crimson: #e62962; --nn-magenta: #8a0b8f; --nn-purple: #5c0ba2;
-  --nn-indigo: #2112b7; --nn-blue: #2e75cb;
-  --nn-grad: linear-gradient(120deg, #f6511d 0%, #e62962 28%, #8a0b8f 52%, #5c0ba2 70%, #2e75cb 100%);
-  --nn-grad-soft: linear-gradient(120deg, rgba(246,81,29,.10), rgba(138,11,143,.10) 50%, rgba(46,117,203,.10));
-  --nn-side: linear-gradient(180deg, #2b0a4d 0%, #23105a 55%, #12306e 100%);
-  --nn-title: #3d0f70;
-  --page: #f6f3fb; --accent: #6b0698; --series-1: #7a14a8;
+  --nn-orange: #ff2e01; --nn-red: #f91615; --nn-crimson: #e70c63; --nn-magenta: #8705a1; --nn-purple: #56078f;
+  --nn-indigo: #2517b7; --nn-blue: #317bb9;
+  --nn-grad: linear-gradient(120deg, #ff5a1f 0%, #f91615 16%, #e70c63 34%, #8705a1 56%, #56078f 74%, #317bb9 100%);
+  --nn-grad-soft: linear-gradient(120deg, rgba(255,46,1,.09), rgba(135,5,161,.09) 50%, rgba(49,123,185,.10));
+  --nn-side: linear-gradient(180deg, #2a0645 0%, #2a0a63 50%, #15307a 100%);
+  --nn-title: #3d0a6e;
+  --page: #f7f4fb; --accent: #8705a1; --series-1: #8705a1;
   --shadow: 0 1px 2px rgba(43,10,77,.06), 0 6px 20px rgba(43,10,77,.06);
 }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --page: #0f0b18; --nn-title: #e9d8ff; --accent: #c58af0; --series-1: #c58af0;
@@ -78,9 +78,10 @@ body { background:
 /* sidebar */
 nav.side { background: var(--nn-side); border-right: 0; color: #fff; box-shadow: 4px 0 24px rgba(43,10,77,.18); }
 nav.side .brand, nav.side .brand-name { color: #fff; }
+nav.side .brand-name { white-space: nowrap; font-size: 19px; }
 nav.side .brand-name .nova { background: linear-gradient(90deg, #ff8a5c, #ff5fa2); -webkit-background-clip: text; background-clip: text; color: transparent; }
 nav.side .brand-tag { color: rgba(255,255,255,.6); }
-nav.side .brand img { background: #fff; border-radius: 50%; padding: 2px; width: 40px; height: 40px; }
+nav.side .brand img { width: 44px; height: 44px; filter: drop-shadow(0 2px 6px rgba(0,0,0,.25)); }
 nav.side .pa-tag { background: var(--nn-grad); color: #fff; }
 .nav-links a { color: rgba(255,255,255,.78); position: relative; }
 .nav-links a:hover { background: rgba(255,255,255,.08); color: #fff; }
@@ -115,7 +116,7 @@ ol.next li::marker { color: var(--nn-magenta); font-weight: 700; }
 
 /* controls */
 button, .btn { border-radius: 10px; }
-button.primary { background: var(--nn-grad); border: 0; color: #fff; font-weight: 600; box-shadow: 0 4px 14px rgba(138,11,143,.25); }
+button.primary { background: var(--nn-grad); border: 0; color: #fff; font-weight: 600; box-shadow: 0 4px 14px rgba(135,5,161,.28); }
 button.primary:hover { filter: brightness(1.06); }
 .tabs a.on, .steps-bar a.on { background: var(--nn-grad); border-color: transparent; color: #fff; }
 .k.sig { background: rgba(230,41,98,.10); color: var(--nn-crimson); }
@@ -131,12 +132,12 @@ input:focus, select:focus, textarea:focus { outline: 2px solid rgba(138,11,143,.
 /* sign-in and join pages */
 body:has(.login) { background: var(--nn-side); min-height: 100vh; }
 body:has(.login)::before { content: ""; position: fixed; inset: 0; pointer-events: none;
-  background: radial-gradient(600px 400px at 15% 20%, rgba(246,81,29,.35), transparent 60%),
-              radial-gradient(600px 400px at 85% 80%, rgba(46,117,203,.35), transparent 60%),
-              radial-gradient(500px 360px at 70% 15%, rgba(230,41,98,.30), transparent 60%); }
+  background: radial-gradient(600px 400px at 15% 20%, rgba(255,46,1,.32), transparent 60%),
+              radial-gradient(600px 400px at 85% 80%, rgba(49,123,185,.38), transparent 60%),
+              radial-gradient(500px 360px at 70% 15%, rgba(231,12,99,.30), transparent 60%); }
 .login { position: relative; border-radius: 20px; padding: 28px; box-shadow: 0 20px 60px rgba(0,0,0,.35); }
 .login .brand { flex-direction: column; text-align: center; gap: 8px; }
-.login .brand img { width: 84px; height: 84px; }
+.login .brand img { width: 108px; height: 108px; }
 .login .brand-name { font-size: 26px; }
 .login button.primary { width: 100%; padding: 10px; font-size: 15px; }
 .acct { display: grid; grid-template-columns: 130px 1fr 1fr auto; gap: 6px; align-items: center; }

@@ -218,7 +218,7 @@ def test_custom_brand_logo_and_safe_colors(tmp_path):
     env = {"DASHBOARD_PASSWORD": "pw-long-enough", "DASHBOARD_SECRET": "s" * 40, "DASHBOARD_INSECURE_COOKIE": "1",
            "NEURANOVA_DB": ":memory:"}
     settings = load_settings(cfg, env=env)
-    assert settings.brand["accent"] == "#6b1fa3"                    # unsafe value rejected
+    assert settings.brand["accent"] == "#8705a1"                    # unsafe value rejected
     store = Store(":memory:", settings.workspace_id, settings.owner_id)
     client = TestClient(create_app(settings, lambda: SimpleNamespace(store=store), store=store))
     login_page = client.get("/login").text
