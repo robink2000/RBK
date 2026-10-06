@@ -3,7 +3,7 @@
 [brand]
 name = "NeuraNova"
 tagline = "Personal Assistant"
-accent = "#6b1fa3"        # NeuraNova purple: buttons, links and charts (light theme)
+accent = "#8705a1"        # NeuraNova purple: buttons, links and charts (light theme)
 accent_dark = "#a06ad9"   # the same purple, lightened for dark theme
 # The NeuraNova logo is built in. To use a different file, put it in the project and give its path.
 # logo = "brand/logo.svg"   # .svg, .png, .jpg or .webp; on Windows use forward slashes: "C:/brand/logo.png"

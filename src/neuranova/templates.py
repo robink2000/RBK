@@ -741,7 +741,7 @@ env = Environment(
                        "join": JOIN, "link": LINK, "team": TEAM, "integrations": INTEGRATIONS, "return": RETURN}),
     autoescape=select_autoescape(default=True, default_for_string=True),
 )
-env.globals["brand"] = {"name": "NeuraNova", "tagline": "Personal Assistant", "accent": "#6b1fa3",
+env.globals["brand"] = {"name": "NeuraNova", "tagline": "Personal Assistant", "accent": "#8705a1",
                         "accent_dark": "#a06ad9"}
 
 from .pa_templates import register as _register_pa  # noqa: E402

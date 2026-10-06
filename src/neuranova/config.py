@@ -121,7 +121,7 @@ def load_settings(config_path: str | Path | None = None, env: dict[str, str] | N
         brand={
             "name": brand.get("name", "NeuraNova"),
             "tagline": brand.get("tagline", "Personal Assistant"),
-            "accent": _color(brand.get("accent"), "#6b1fa3"),
+            "accent": _color(brand.get("accent"), "#8705a1"),
             "accent_dark": _color(brand.get("accent_dark"), "#a06ad9"),
             "logo": brand.get("logo", ""),
         },
