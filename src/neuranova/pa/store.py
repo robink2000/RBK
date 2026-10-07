@@ -182,7 +182,9 @@ def norm(text: str) -> str:
 
 def similarity(a: str, b: str) -> float:
     """Word-overlap similarity (0..1) used to spot duplicate items without an AI call."""
-    stop = {"the", "a", "an", "to", "for", "of", "and", "on", "in", "with", "by", "from", "re", "fw", "fwd", "please"}
+    stop = {"the", "a", "an", "to", "for", "of", "and", "on", "in", "with", "by", "from", "re", "fw", "fwd", "please",
+            "about", "regarding", "at", "as", "is", "are", "be", "will", "it", "this", "that", "me", "my", "our", "your",
+            "i", "we", "you", "call", "send", "share", "get", "follow", "up", "check", "update", "reply", "mr", "mrs", "ms"}
     wa = {w for w in norm(a).split() if w not in stop}
     wb = {w for w in norm(b).split() if w not in stop}
     if not wa or not wb:
@@ -266,9 +268,9 @@ class PAStore:
         if not changes and not note:
             return False
         if changes:
-            if changes.get("status") == "closed" and not current["completed_at"]:
+            if changes.get("status") in ("closed", "verified") and not current["completed_at"]:
                 changes.setdefault("completed_at", now_iso())
-            if "status" in changes and changes["status"] in ACTIVE and current["status"] == "closed":
+            if "status" in changes and changes["status"] in ACTIVE and current["status"] in ("closed", "verified"):
                 changes["completed_at"] = None
             if "due_at" in changes:
                 changes.update(reminded=0, overdue_alerted=0)

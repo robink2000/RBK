@@ -77,9 +77,9 @@ def parse_deadline(text: str, now: datetime, start_of_day: time = time(9, 0),
             return build(date(int(m.group(1)), int(m.group(2)), int(m.group(3))), end_of_day)
         except ValueError:
             return None
-    if m := re.search(r"\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?([a-z]{3,9})\b|\b([a-z]{3,9})\s+(\d{1,2})(?:st|nd|rd|th)?\b", s):
+    for m in re.finditer(r"\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?([a-z]{3,9})\b|\b([a-z]{3,9})\s+(\d{1,2})(?:st|nd|rd|th)?\b", s):
         day_s, mon_s = (m.group(1), m.group(2)) if m.group(1) else (m.group(4), m.group(3))
-        if mon_s in MONTHS:
+        if mon_s in MONTHS:  # "send 3 reports by 12 oct": skip "3 reports", use "12 oct"
             month, day_n = MONTHS[mon_s], int(day_s)
             year = today.year
             try:
@@ -104,12 +104,16 @@ def parse_deadline(text: str, now: datetime, start_of_day: time = time(9, 0),
         return build(today + timedelta(days=2), end_of_day)
     if re.search(r"\b(tomorrow|tmrw|tmr)\b", s):
         return build(today + timedelta(days=1), start_of_day if "morning" in s else end_of_day)
+    def not_past(dt: datetime) -> datetime:
+        # said after hours ("today" at 7 pm): mean the next day, never something already overdue
+        return dt if dt > now else dt + timedelta(days=1)
+
     if re.search(r"\btonight\b", s):
-        return build(today, time(20, 0))
+        return not_past(build(today, time(20, 0)))
     if re.search(r"\b(eod|cob|end of (the )?day|today|by evening|this evening)\b", s):
-        return build(today, end_of_day)
+        return not_past(build(today, end_of_day))
     if re.search(r"\b(month[- ]end|end of (the )?month)\b", s):
-        return build(date(today.year, today.month, calendar.monthrange(today.year, today.month)[1]), end_of_day)
+        return not_past(build(date(today.year, today.month, calendar.monthrange(today.year, today.month)[1]), end_of_day))
     if re.search(r"\bnext month\b", s):
         first = date(today.year + (today.month == 12), today.month % 12 + 1, 1)
         return build(first, start_of_day)
@@ -123,6 +127,8 @@ def parse_deadline(text: str, now: datetime, start_of_day: time = time(9, 0),
             # "before Friday" = done by the start of Friday's working day
             return build(_next_weekday(today, idx), start_of_day)
         if re.search(rf"\b(by|on|this|coming)?\s*{name}\b", s):
+            if today.weekday() == idx and build(today, end_of_day) > now and not re.search(rf"\bcoming {name}\b", s):
+                return build(today, end_of_day)          # "by Friday" said on Friday morning = today
             return build(_next_weekday(today, idx), end_of_day)
     if re.search(r"\bnext week\b", s):
         return build(_next_weekday(today, 0, strictly_next_week=True), start_of_day)
@@ -144,6 +150,6 @@ def bucket(due: datetime | None, now: datetime) -> str:
         return "today"
     if days == 1:
         return "tomorrow"
-    if due.date() <= now.date() + timedelta(days=6 - now.weekday()) or days < 7:
+    if due.date() <= now.date() + timedelta(days=6 - now.weekday()):
         return "this_week"
     return "later"

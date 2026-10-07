@@ -112,9 +112,16 @@ def test_assign_complete_block_and_permissions(tmp_path):
     assert store.team_task(task_id)["status"] == "done"
 
 
-def test_team_reminders_fire_once(tmp_path):
+def test_team_reminders_fire_once(tmp_path, monkeypatch):
     settings, store, agent, owner, priya, outbox, _ = make_team(tmp_path)
     now = datetime.now(timezone.utc)
+    import neuranova.jobs as jobs_mod
+    monkeypatch.setattr(jobs_mod, "_in_hours", lambda when, hours: False)      # night: nobody is pinged
+    agent.assign_team_task(owner, priya, "Night check", now - timedelta(hours=1))
+    outbox.by_number.clear()
+    assert agent.team_reminders() == {"reminded": 0, "overdue": 0} and not outbox.by_number.get(PRIYA_NUM)
+    store.update_team_task(store.team_tasks("open")[0]["id"], status="done")
+    monkeypatch.setattr(jobs_mod, "_in_hours", lambda when, hours: True)       # working hours
     soon = agent.assign_team_task(owner, priya, "Call Acme", now + timedelta(minutes=10))
     late = agent.assign_team_task(owner, priya, "Invoice Globex", now - timedelta(hours=2))
     outbox.by_number.clear()

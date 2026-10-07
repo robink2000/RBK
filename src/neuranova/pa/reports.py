@@ -52,6 +52,8 @@ def facts(kind: str, store, settings, now: datetime | None = None, meetings: dic
     now = (now or datetime.now(timezone.utc)).astimezone(settings.tz)
     days = PERIOD_DAYS[kind]
     start = now - timedelta(days=days)
+    if kind in ("eod", "morning"):        # "today" means the calendar day here, not the last 24 hours
+        start = datetime.combine(now.date(), datetime.min.time(), now.tzinfo) - (timedelta(days=1) if kind == "morning" else timedelta())
     b = briefing.build(store, settings, now=now, meetings=(meetings or {}).get("today"))
     biz = business.pipeline(pa, days=max(days, 7), now=now)
     qual = quality.summary(pa, days=max(days, 14), now=now)

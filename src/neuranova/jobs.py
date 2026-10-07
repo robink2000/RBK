@@ -20,6 +20,8 @@ from .progress import compute as compute_progress, team_stats, weekly_series
 from .sla import reply_deadline
 from .team import TeamError, can_change, format_task
 
+from .pa.proactive import _in_hours  # noqa: E402
+
 log = logging.getLogger(__name__)
 
 FIRST_RUN_LOOKBACK = timedelta(days=2)
@@ -157,6 +159,8 @@ class Agent:
                                       find_owner=self._find_owner)
             except Exception:
                 log.exception("PA analysis failed for email %s", r["id"])
+                if self._give_up(f"email:{r['id']}"):
+                    self.store.mark_email_pa(r["id"])
                 continue
             self.store.mark_email_pa(r["id"])
             self.store.log("pa_analyzed", channel="email", ref=r["id"], changes=out.applied)
@@ -174,6 +178,8 @@ class Agent:
                                       find_owner=self._find_owner)
             except Exception:
                 log.exception("PA analysis failed for message %s", m["id"])
+                if self._give_up(f"msg:{m['id']}"):
+                    self.pa.mark_analyzed(m["id"], text[:200], "low")
                 continue
             self.pa.mark_analyzed(m["id"], out.summary, out.importance)
             self.store.log("pa_analyzed", channel=m["channel"], ref=m["id"], changes=out.applied)
@@ -196,6 +202,13 @@ class Agent:
         self.store.log("outbox_drafted", outbox=outbox_id, channel=channel, by=by_user)
         return outbox_id
 
+    def _give_up(self, key: str, tries: int = 3) -> bool:
+        """Count failed analyses of one message; after `tries` stop retrying so it can't block newer ones."""
+        k = f"pa_fail:{key}"
+        n = int(self.store.get(k) or 0) + 1
+        self.store.put(k, str(n))
+        return n >= tries
+
     def send_outbox(self, outbox_id: int, by_user: str, body: str | None = None) -> str:
         """Send an approved message. Returns a plain result for the founder."""
         o = self.pa.outbox_item(outbox_id)
@@ -204,7 +217,8 @@ class Agent:
         if o["status"] != "pending":
             return f"Message #{outbox_id} is already {o['status']}."
         if body is not None and body.strip() and body.strip() != o["body"]:
-            self.pa.conn.execute("UPDATE outbox SET body = ? WHERE id = ?", (body.strip(), outbox_id))
+            self.pa.conn.execute("UPDATE outbox SET body = ? WHERE id = ? AND workspace_id = ? AND status = 'pending'",
+                                 (body.strip(), outbox_id, self.pa.ws))
             self.pa.conn.commit()
             o = self.pa.outbox_item(outbox_id)
         if not self.pa.transition_outbox(outbox_id, "pending", "sending", by=by_user):
@@ -214,10 +228,6 @@ class Agent:
                 if not self.notifier_factory:
                     raise RuntimeError("WhatsApp isn't connected")
                 self.notifier_factory(o["recipient"]).send(o["body"])
-                contact = self.pa.contact_for(phone=o["recipient"], name=o["recipient_name"])
-                self.pa.add_message("whatsapp", "out", f"outbox-{outbox_id}", o["body"], self._now(),
-                                    recipient=o["recipient"], contact_id=contact)
-                self.pa.mark_thread_replied("whatsapp", contact, self._now())
             else:
                 conn = next((c for c in self.mail if hasattr(c, "send_new")), None)
                 if conn is None:
@@ -228,6 +238,14 @@ class Agent:
             self.pa.transition_outbox(outbox_id, "sending", "pending", by=by_user, error=str(exc)[:300])
             return f"❌ Couldn't send message #{outbox_id}: {str(exc)[:160]}. It's still waiting in Approvals."
         self.pa.transition_outbox(outbox_id, "sending", "sent", by=by_user)
+        if o["channel"] == "whatsapp":      # bookkeeping after the send: a failure here must not re-queue it
+            try:
+                contact = self.pa.contact_for(phone=o["recipient"], name=o["recipient_name"])
+                self.pa.add_message("whatsapp", "out", f"outbox-{outbox_id}", o["body"], self._now(),
+                                    recipient=o["recipient"], contact_id=contact)
+                self.pa.mark_thread_replied("whatsapp", contact, self._now())
+            except Exception:
+                log.exception("Sent outbox %s but could not record it in the conversation", outbox_id)
         if o["item_id"]:
             self.pa.update_item(o["item_id"], by_user, note=f"{o['channel'].capitalize()} sent to {o['recipient_name'] or o['recipient']}",
                                 follow_up_at=self._now() + timedelta(days=1))
@@ -267,8 +285,8 @@ class Agent:
                                      item_id=row["id"], subject=f"Follow-up: {row['title'][:60]}")
             self.store.reminder_sent(key, "pa")
             made += 1
-            if prefs.may_send_automatically(self.store, "followups"):
-                self.send_outbox(outbox_id, "PA (trusted automation)")
+            if prefs.may_send_automatically(self.store, "followups") and _in_hours(now, self.settings.working_hours):
+                self.send_outbox(outbox_id, "PA (trusted automation)")   # outside hours it waits in Approvals
         return made
 
     def proactive(self) -> dict:
@@ -526,6 +544,8 @@ class Agent:
             due = row_dt(t["due_at"])
             if due is None or t["status"] == "blocked":
                 continue
+            if not _in_hours(now, self.settings.working_hours) and t.get("priority") != "urgent":
+                continue                    # nobody gets pinged at night or on weekends; they come in the morning
             assignee = self.store.user(t["assignee_id"])
             if now < due <= now + lead and not t["reminded"]:
                 self.notify_user(assignee, f"⏰ Due {self._fmt(due)}: #{t['id']} {t['title']}")

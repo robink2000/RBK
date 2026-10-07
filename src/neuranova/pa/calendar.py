@@ -64,18 +64,21 @@ def fetch(urls: list[str], tz, days: int = 7, http: httpx.Client | None = None,
     start = datetime.combine(now.date(), datetime.min.time(), tz) - timedelta(days=1)
     end = start + timedelta(days=days + 1)
     client = http or httpx.Client(timeout=15, follow_redirects=True)
-    events = []
+    events, failures, tried = [], [], 0
     for url in urls:
         url = url.strip().replace("webcal://", "https://")
         if not url:
             continue
+        tried += 1
         try:
             resp = client.get(url)
             resp.raise_for_status()
             events += _events_from_ics(resp.text, start, end)
-        except Exception as exc:
+        except Exception as exc:                 # one broken calendar must not hide the others
             log.warning("Calendar %s could not be read: %s", url[:40], exc)
-            raise RuntimeError(f"Couldn't read the calendar ({str(exc)[:120]}). Check the private address.") from exc
+            failures.append(str(exc)[:120])
+    if tried and len(failures) == tried:
+        raise RuntimeError(f"Couldn't read the calendar ({failures[0]}). Check the private address.")
     events.sort(key=lambda e: e["start"])
     return events
 

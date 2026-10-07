@@ -182,7 +182,7 @@ def build(store, settings, now: datetime | None = None, meetings: list[dict] | N
         (len(waiting_late), "person has not delivered as promised", "waiting_others"),
         (len(focus["follow_ups"]), "follow-up due", "follow_ups"),
         (len(payments), "payment matter open", "opportunities"),
-        (len(biz["hot"]) + len(biz["follow_ups_due"]), "lead needs attention", "opportunities"),
+        (len({r["id"] for r in biz["hot"]} | {r["id"] for r in biz["follow_ups_due"]}), "lead needs attention", "opportunities"),
         (len(retest), "application fix needs retesting", "app_issues"),
         (len(patterns), "recurring quality issue", "quality"),
         (len(focus["decisions"]), "management decision pending", "decisions"),
