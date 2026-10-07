@@ -24,6 +24,8 @@ a = Analysis([SPECPATH + "/neuranova_pa.py"], pathex=[ROOT + "/src"], binaries=b
              hiddenimports=hidden, excludes=["tkinter", "pytest", "IPython", "matplotlib", "numpy"], noarchive=False)
 a.datas = [d for d in a.datas if "discovery_cache" not in d[0].replace("\\", "/") or "gmail.v1" in d[0]]
 pyz = PYZ(a.pure)
-exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="NeuraNova PA", console=False,
+# UTF-8 mode: files and .env are always read/written as UTF-8, whatever the Windows language
+utf8 = [("X utf8_mode=1", None, "OPTION")]
+exe = EXE(pyz, a.scripts, utf8, exclude_binaries=True, name="NeuraNova PA", console=False,
           icon=SPECPATH + "/neuranova.ico" if __import__("os").path.exists(SPECPATH + "/neuranova.ico") else None)
 coll = COLLECT(exe, a.binaries, a.datas, name="NeuraNova PA")

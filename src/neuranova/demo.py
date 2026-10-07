@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import random
 import secrets
-import webbrowser
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -234,8 +233,6 @@ def run_demo(port: int = 8080, open_browser: bool = True, config_path: str | Non
   Sample data only (data/demo.db). Press Ctrl+C to stop.
 """, flush=True)
     if open_browser:
-        try:
-            webbrowser.open(f"{url}/login")
-        except Exception:
-            pass
+        from .launcher import open_later
+        open_later(f"{url}/login")          # opens once the demo actually answers
     uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")

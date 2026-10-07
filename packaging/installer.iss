@@ -24,13 +24,17 @@ UninstallDisplayIcon={app}\NeuraNova PA.exe
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
-CloseApplications=yes
+CloseApplications=no
 RestartApplications=no
 ArchitecturesInstallIn64BitMode=x64compatible
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts:"
 Name: "startup"; Description: "Start NeuraNova PA automatically when I sign in to Windows (recommended: reminders and checks keep running)"; GroupDescription: "Background:"
+
+[InstallDelete]
+; the previous version's program files (never the data, which lives in %LOCALAPPDATA%\NeuraNova PA)
+Type: filesandordirs; Name: "{app}\_internal"
 
 [Files]
 Source: "..\dist\NeuraNova PA\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -46,3 +50,26 @@ Name: "{userstartup}\NeuraNova PA"; Filename: "{app}\NeuraNova PA.exe"; Paramete
 
 [Run]
 Filename: "{app}\NeuraNova PA.exe"; Description: "Start NeuraNova PA now"; Flags: nowait postinstall skipifsilent
+
+[Code]
+// A copy running in the system tray would lock its files: close it before installing or uninstalling.
+// Only the program is stopped; data is safe (SQLite) and nothing outside NeuraNova PA is touched.
+procedure StopRunningCopies();
+var
+  Code: Integer;
+begin
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /T /IM "NeuraNova PA.exe"', '', SW_HIDE, ewWaitUntilTerminated, Code);
+  Sleep(800);
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  StopRunningCopies();
+  Result := '';
+end;
+
+function InitializeUninstall(): Boolean;
+begin
+  StopRunningCopies();
+  Result := True;
+end;
