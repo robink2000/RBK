@@ -477,10 +477,10 @@ TASK = """{% extends "base" %}{% from "nav" import top with context %}{% from "p
         {% if i.due %}<label class="check" style="margin-top:4px"><input type="checkbox" name="clear_due"> no due date</label>{% endif %}</div>
     </div>
     <div class="form-grid">
-      <label>Person / contact<input name="related_person" value="{{ i.who }}" maxlength="120"></label>
+      <label>Person / contact<input name="related_person" value="{{ i.related_person_raw }}" maxlength="120"></label>
       <label>Waiting on<input name="waiting_on" value="{{ i.waiting_on }}" maxlength="120"></label>
       <label>Project<input name="related_project" value="{{ i.related_project }}" maxlength="120"></label>
-      <label>Next action<input name="next_action" value="{{ i.next_action }}" maxlength="200"></label>
+      <label>Next action<input name="next_action" value="{{ i.next_action_raw }}" maxlength="200"></label>
     </div>
     {% if i.kind == 'lead' %}<div class="form-grid">
       <label>Stage<select name="stage">{% for k, v in labels.lead_stages.items() %}<option value="{{ k }}" {{ 'selected' if k == i.stage else '' }}>{{ v }}</option>{% endfor %}</select></label>
@@ -554,7 +554,7 @@ COMMUNICATIONS = """{% extends "base" %}{% from "nav" import top with context %}
   <div class="draft" style="margin-bottom:18px">
     <div><strong>Email reply → {{ d.to }}</strong> <span class="meta">· {{ d.subject }}</span></div><div class="meta">{{ d.summary }}</div>
     {% for q in d.needs %}{% if loop.first %}<div class="needs"><strong>Needs you:</strong><ul style="margin:4px 0 0 18px;padding:0">{% endif %}<li>{{ q }}</li>{% if loop.last %}</ul></div>{% endif %}{% endfor %}
-    <form method="post" action="/drafts/{{ d.id }}/edit"><input type="hidden" name="csrf" value="{{ csrf }}">
+    <form method="post" action="/drafts/{{ d.id }}/edit"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="back" value="/communications#approvals">
       <textarea class="body" name="body" aria-label="Reply text">{{ d.body }}</textarea>
       <div class="actions"><button type="submit">Save changes</button><button class="primary" type="submit" formaction="/drafts/{{ d.id }}/send">Save &amp; send</button><button type="submit" formaction="/drafts/{{ d.id }}/skip">Skip</button></div></form>
   </div>{% endfor %}
@@ -606,6 +606,7 @@ QA = """{% extends "base" %}{% from "nav" import top with context %}{% from "pa"
   <p class="sub">{% if env_key == 'production' %}Safe monitoring only: pages load, sign-in works, no errors. Nothing is clicked that changes data.{% else %}Full workflow tests for each role, including clicks and forms.{% endif %}
     {{ cfg.accounts[env_key]|length }} test account(s).</p>
   {% if running.get(env_key) %}<p><strong>Checks are running…</strong> refresh in a minute.</p>
+  {% elif me.role != 'admin' %}<p class="meta">Checks run automatically. An admin can also start them by hand.</p>
   {% else %}<form method="post" action="/qa/run/{{ env_key }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="primary" type="submit">Run checks now</button></form>{% endif %}
   {% else %}<p class="empty">Not set up. {% if me.role == 'admin' %}<a href="/settings?section=apps">Add the address</a>.{% endif %}</p>{% endif %}
 </section>{% endfor %}
