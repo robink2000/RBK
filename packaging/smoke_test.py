@@ -33,12 +33,13 @@ def wait_for(url: str, seconds: int = 90) -> httpx.Response:
 def main(exe: str) -> int:
     home = Path(tempfile.mkdtemp(prefix="nnpa-smoke-"))
     log = open(home / "smoke.log", "w")
-    env = {**os.environ, "NEURANOVA_HOME": str(home / "app")}
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONUTF8"}      # prove UTF-8 doesn't depend on it
+    env["NEURANOVA_HOME"] = str(home / "app")
     proc = subprocess.Popen([exe, "--no-browser", "--port", str(PORT)], env=env, stdout=log, stderr=subprocess.STDOUT)
     try:
         first = wait_for(BASE + "/")
         assert "Welcome to NeuraNova PA" in first.text, "first-run page missing"
-        r = httpx.post(BASE + "/", data={"email": "founder@neuranova.in", "name": "Smoke Test", "password": PASSWORD,
+        r = httpx.post(BASE + "/", data={"email": "founder@neuranova.in", "name": "José Łukasz Müller", "password": PASSWORD,
                                          "password2": PASSWORD, "tz": "Asia/Kolkata"}, timeout=30)
         assert "Starting NeuraNova PA" in r.text, r.text[:300]
         time.sleep(3)
@@ -46,6 +47,7 @@ def main(exe: str) -> int:
         with httpx.Client(base_url=BASE, timeout=60) as c:
             r = c.post("/login", data={"email": "founder@neuranova.in", "password": PASSWORD})
             assert r.status_code == 303 and r.headers["location"] == "/setup", (r.status_code, r.headers)
+            assert "José" in c.get("/setup").text                                       # name survived .env round trip
             for page in PAGES:
                 r = c.get(page)
                 assert r.status_code == 200, (page, r.status_code)

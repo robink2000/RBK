@@ -232,12 +232,12 @@ def mount_dashboard(app: FastAPI, settings: Settings, agent_factory: Callable, s
     # --- home -------------------------------------------------------------------
 
     @app.get("/")
-    def dashboard(request: Request, days: int = 7, msg: str = "") -> Response:
+    def dashboard(request: Request, days: str = "7", msg: str = "") -> Response:
         agent = agent_factory()
         me, cookie = current(request, agent)
         if not me:
             return RedirectResponse("/login", status_code=303)
-        days = days if days in (7, 30, 90) else 7
+        days = int(days) if days in ("7", "30", "90") else 7
         store, tz = agent.store, settings.tz
         now = datetime.now(timezone.utc)
         is_owner = me["id"] == settings.owner_id
@@ -307,34 +307,40 @@ def mount_dashboard(app: FastAPI, settings: Settings, agent_factory: Callable, s
 
     # --- drafts (founder only: they send from the founder's mailbox) ------------------
 
-    def draft_action(request: Request, csrf: str, action: Callable) -> Response:
+    def draft_action(request: Request, csrf: str, action: Callable, draft_id: int | None = None,
+                     to: str = "") -> Response:
         g = guarded(request, csrf)
         if isinstance(g, Response):
             return g
         agent, me = g
         if me["id"] != settings.owner_id:
             return oops("Only the founder can act on reply drafts.")
-        return back("/#drafts", action(agent))
+        where = to if to in ("/communications#approvals",) else "/#drafts"     # return to the page used
+        if draft_id is not None and agent.store.draft(draft_id) is None:
+            return back(where, f"Draft #{draft_id} isn't there any more.")
+        return back(where, action(agent))
 
     @app.post("/drafts/{draft_id}/edit")
-    def edit(request: Request, draft_id: int, csrf: str = Form(""), body: str = Form("")) -> Response:
+    def edit(request: Request, draft_id: int, csrf: str = Form(""), body: str = Form(""),
+             to: str = Form("", alias="back")) -> Response:
         def run(agent):
             agent.edit_draft(draft_id, body)
             return f"Saved draft #{draft_id}."
-        return draft_action(request, csrf, run)
+        return draft_action(request, csrf, run, draft_id, to)
 
     @app.post("/drafts/{draft_id}/send")
-    def send(request: Request, draft_id: int, csrf: str = Form(""), body: str = Form("")) -> Response:
+    def send(request: Request, draft_id: int, csrf: str = Form(""), body: str = Form(""),
+             to: str = Form("", alias="back")) -> Response:
         def run(agent):
             d = agent.store.draft(draft_id)
             if d and body.strip() and body.strip() != d["body"]:
                 agent.edit_draft(draft_id, body)
             return agent.send_draft(draft_id)
-        return draft_action(request, csrf, run)
+        return draft_action(request, csrf, run, draft_id, to)
 
     @app.post("/drafts/{draft_id}/skip")
-    def skip(request: Request, draft_id: int, csrf: str = Form("")) -> Response:
-        return draft_action(request, csrf, lambda agent: agent.skip_draft(draft_id))
+    def skip(request: Request, draft_id: int, csrf: str = Form(""), to: str = Form("", alias="back")) -> Response:
+        return draft_action(request, csrf, lambda agent: agent.skip_draft(draft_id), draft_id, to)
 
     # --- events -----------------------------------------------------------------------
 

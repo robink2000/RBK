@@ -76,9 +76,21 @@ def running_version(port: int) -> str | None:
     return data.get("version", "") if data.get("app") == "neuranova-pa" or "version" not in data else ""
 
 
-def open_later(url: str, delay: float = 2.5) -> None:
+def open_later(url: str, delay: float = 1.0, wait_for: str = "/health", timeout: float = 120) -> None:
+    """Open the browser once the page really answers (a cold start can take a while), never on a dead page."""
     def go():
         time.sleep(delay)
+        base = url.split("/", 3)
+        probe = f"{base[0]}//{base[2]}{wait_for}"
+        end = time.time() + timeout
+        while time.time() < end:
+            try:
+                import httpx
+                if httpx.get(probe, timeout=2).status_code < 500:
+                    break
+            except Exception:
+                pass
+            time.sleep(0.7)
         try:
             webbrowser.open(url)
         except Exception:
@@ -103,12 +115,17 @@ button{font:inherit;font-weight:600;background:linear-gradient(120deg,#f26a1b,#f
 <label>Your name<input name="name" required value="{name}"></label>
 <label>Choose a password (at least 10 characters)<input name="password" type="password" required minlength="10" autocomplete="new-password"></label>
 <label>Type it again<input name="password2" type="password" required minlength="10" autocomplete="new-password"></label>
-<label>Timezone<input name="tz" required value="{tz}"></label>
-<button type="submit">Create login and start</button></form></div></body></html>"""
+<label>Timezone<input name="tz" required value="{tz}" data-known="{tz_known}"></label>
+<button type="submit">Create login and start</button></form></div>
+<script>(function(){var i=document.querySelector('[name=tz]');try{var z=Intl.DateTimeFormat().resolvedOptions().timeZone;
+if(z&&i.dataset.known!=="1"){i.value=z;}}catch(e){}})();</script></body></html>"""
 
-STARTING = """<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="6;url=/login">
-<title>Starting NeuraNova PA</title></head><body style="font-family:system-ui;padding:40px">
-<h2>Starting NeuraNova PA…</h2><p>This page opens the sign-in screen in a few seconds. Sign in with the email and password you just chose.</p></body></html>"""
+STARTING = """<!doctype html><html><head><meta charset="utf-8"><title>Starting NeuraNova PA</title></head>
+<body style="font-family:'Segoe UI',system-ui;padding:40px;color:#3b0d6b"><h2>Starting NeuraNova PA…</h2>
+<p>The sign-in screen opens by itself in a moment. Sign in with the email and password you just chose.</p>
+<script>(function poll(){fetch('/health',{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){
+if(d&&d.version&&!d.setup){location.href='/login';}else{setTimeout(poll,800);}}).catch(function(){setTimeout(poll,800);});})();</script>
+</body></html>"""
 
 
 def first_run(home: Path, port: int, browser: bool) -> bool:
@@ -125,13 +142,20 @@ def first_run(home: Path, port: int, browser: bool) -> bool:
     done = threading.Event()
 
     def form(error="", email="", name="", tz=""):
+        guess = tz or guess_timezone()
         return HTMLResponse(FIRST_RUN.replace("{error}", f'<p class="err">{html.escape(error)}</p>' if error else "")
                             .replace("{email}", html.escape(email)).replace("{name}", html.escape(name))
-                            .replace("{tz}", html.escape(tz or guess_timezone() or "Asia/Kolkata")))
+                            .replace("{tz_known}", "1" if guess else "0")
+                            .replace("{tz}", html.escape(guess or "Asia/Kolkata")))   # the page swaps in the PC's zone
 
     @app.get("/")
     def show():
         return form()
+
+    @app.get("/health")
+    def health():
+        from . import __version__
+        return {"ok": True, "app": "neuranova-pa", "version": __version__, "setup": True}
 
     @app.get("/logo")
     def logo():
@@ -159,7 +183,7 @@ def first_run(home: Path, port: int, browser: bool) -> bool:
     threading.Thread(target=watch, daemon=True).start()
     print(f"First run: finish setup in your browser at http://localhost:{port}", flush=True)
     if browser:
-        open_later(f"http://localhost:{port}/", 1.5)
+        open_later(f"http://localhost:{port}/", 0.5, wait_for="/")
     server.run()
     return done.is_set()
 
@@ -175,7 +199,10 @@ def send_output_to_log(home: Path) -> Path:
     logs.mkdir(exist_ok=True)
     path = logs / "neuranova-pa.log"
     if path.exists() and path.stat().st_size > 5_000_000:
-        path.replace(logs / "neuranova-pa.old.log")
+        try:
+            path.replace(logs / "neuranova-pa.old.log")
+        except OSError:
+            pass                      # another copy has it open; rotate next time
     stream = open(path, "a", encoding="utf-8", buffering=1)
     sys.stdout = sys.stderr = stream
     return path
@@ -212,7 +239,10 @@ def run_tray(home: Path, port: int, work) -> int:
         except SystemExit as exc:
             result["code"] = exc.code if isinstance(exc.code, int) else 1
             if exc.code not in (0, None):
-                tell(f"NeuraNova PA stopped: {exc.code}", wait=True)
+                reason = exc.code if isinstance(exc.code, str) else (
+                    f"it couldn't use the address http://localhost:{port} (another program may be blocking it). "
+                    "Restart your computer and try again")
+                tell(f"NeuraNova PA stopped: {reason}.\n\nDetails are in {home / 'logs' / 'neuranova-pa.log'}.", wait=True)
         except Exception as exc:
             result["code"] = 1
             tell(f"NeuraNova PA stopped because of an error:\n{exc}\n\nDetails are in {home / 'logs'}.", wait=True)
@@ -260,11 +290,14 @@ def main(argv: list[str] | None = None) -> int:
 
     from .cli import main as cli_main
     if rest:                                    # e.g. neuranova-pa report weekly
+        if windowed_mode["on"] and rest[0] in ("setup", "auth", "cmd"):
+            tell("That command needs a console. Use NeuraNova PA's Settings page in the browser instead.", wait=True)
+            return 2
         return cli_main(rest)
     if port_busy(args.port):
         from . import __version__
         running = running_version(args.port)
-        if running == __version__ and not args.demo:
+        if running == __version__:
             print(f"{APP_NAME} is already running. Opening it in your browser.", flush=True)
             if not args.no_browser:
                 webbrowser.open(f"http://localhost:{args.port}/")
@@ -289,8 +322,9 @@ def main(argv: list[str] | None = None) -> int:
             if not first_run(home, port, not args.no_browser):
                 return 1
         elif not args.no_browser:
-            open_later(f"http://localhost:{port}/", 4)
+            open_later(f"http://localhost:{port}/")
         os.environ["WEBHOOK_PORT"] = str(port)
+        os.environ["PUBLIC_URL"] = f"http://localhost:{port}"   # sign-in links follow the address in use today
         print(f"{APP_NAME} is running at http://localhost:{port}"
               + (" (in the system tray, next to the clock)." if windowed_mode["on"] else
                  " — keep this window open (Ctrl+C to stop)."), flush=True)

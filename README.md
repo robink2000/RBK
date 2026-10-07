@@ -117,8 +117,10 @@ Everything else works without credentials. Without AI, briefings, alerts, the pi
 
 ## Test results
 
-- **156 automated tests** pass (`pytest`). They cover the data model, date parsing, communication analysis and dedupe, briefing ranking, proactive alerts, business and quality logic, reports, calendar, the AI provider layer (Claude and OpenAI), **real-browser QA runs** against a test site (Production safety, evidence, regressions, auto-verify), every web page for founder and member, permissions, Safe Mode, encrypted settings, the hashed password, and the email/WhatsApp/Todoist connectors with fakes.
-- **Packaged-program smoke test** (`packaging/smoke_test.py`): starts the built program in a clean folder, completes the first-run page, signs in, opens every page, writes a report, creates a task, and confirms the password is in neither `.env` nor the log.
+- **168 automated tests** pass (`pytest`). They cover the data model, date parsing, communication analysis and dedupe, briefing ranking, proactive alerts, business and quality logic, reports, calendar, the AI provider layer (Claude and OpenAI), **real-browser QA runs** against a test site (Production safety, evidence, regressions, auto-verify), every web page for founder and member, permissions, Safe Mode, encrypted settings, the hashed password, and the email/WhatsApp/Todoist connectors with fakes.
+- **Click-through robot**: signs in as the founder and as a team member and visits every page (about 60). It submits every form (about 40) with realistic values and records any error page, server error or browser error. The latest run: zero problems.
+- **Expert code review** of the web pages, the business logic and the Windows packaging. Every confirmed bug was fixed, with a regression test.
+- **Packaged-program smoke test** (`packaging/smoke_test.py`): starts the built program in a clean folder, completes the first-run page (with an accented name, to prove UTF-8 handling), signs in, opens every page, writes a report, creates a task, and confirms the password is in neither `.env` nor the log.
 - **Windows CI** (`.github/workflows/windows.yml`, on `windows-latest`): runs all tests on Windows, builds the program, runs the smoke test, builds the installer, **silently installs it, starts it, runs the smoke test against the installed copy and uninstalls it**, then publishes the installer and ZIP.
 
 ## Recommended next improvements

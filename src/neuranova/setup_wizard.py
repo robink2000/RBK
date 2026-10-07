@@ -84,7 +84,7 @@ def _quote(value: str) -> str:
 def write_env(path: Path, updates: dict[str, str | None]) -> None:
     """Set keys in a .env file, keeping every other line (and comments) as they are.
     A value of None removes the key."""
-    lines = path.read_text().splitlines() if path.exists() else []
+    lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
     done = set()
     out = []
     for line in lines:
@@ -104,18 +104,18 @@ def write_env(path: Path, updates: dict[str, str | None]) -> None:
     for key, value in updates.items():
         if key not in done and value is not None:
             out.append(f"{key}={_quote(value)}")
-    path.write_text("\n".join(out).rstrip() + "\n")
+    path.write_text("\n".join(out).rstrip() + "\n", encoding="utf-8")
 
 
 def set_timezone(config: Path, tz: str) -> None:
-    text = config.read_text() if config.exists() else ""
+    text = config.read_text(encoding="utf-8") if config.exists() else ""
     if re.search(r'(?m)^timezone\s*=', text):
         text = re.sub(r'(?m)^timezone\s*=\s*"[^"]*"', f'timezone = "{tz}"', text, count=1)
     elif re.search(r"(?m)^\[workspace\]", text):
         text = re.sub(r"(?m)^\[workspace\]\s*$", f'[workspace]\ntimezone = "{tz}"', text, count=1)
     else:
         text += f'\n[workspace]\ntimezone = "{tz}"\n'
-    config.write_text(text)
+    config.write_text(text, encoding="utf-8")
 
 
 def apply(env_path: Path, config_path: Path, email: str, name: str, password: str, tz: str,
@@ -125,7 +125,7 @@ def apply(env_path: Path, config_path: Path, email: str, name: str, password: st
     if not name.strip():
         raise SetupError("Enter your name.")
     if not env_path.exists() and example and example.exists():
-        env_path.write_text(example.read_text())
+        env_path.write_text(example.read_text(encoding="utf-8"), encoding="utf-8")
     current = dotenv_values(env_path) if env_path.exists() else {}
     kept_secret = bool((current.get("DASHBOARD_SECRET") or "").strip())
     local = url.startswith("http://localhost") or url.startswith("http://127.0.0.1")
@@ -172,7 +172,7 @@ def run_interactive(env_path: Path = Path(".env"), config_path: Path = Path("neu
         if _ask("Type it again", secret=True) == password:
             break
         print("  The two passwords don't match. Try again.")
-    config_text = config_path.read_text() if config_path.exists() else ""
+    config_text = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
     current_tz = re.search(r'(?m)^timezone\s*=\s*"([^"]+)"', config_text)
     tz_default = guess_timezone() or (current_tz.group(1) if current_tz and current_tz.group(1) != "UTC" else "")
     tz = _ask("Your timezone (e.g. Asia/Kolkata, Europe/London)", tz_default or "UTC", check_timezone)

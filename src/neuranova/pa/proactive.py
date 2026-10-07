@@ -64,10 +64,10 @@ def candidates(store, settings, now: datetime) -> list[dict]:
     for row in biz["hot"]:
         add(f"lead:{row['id']}:hot", f"🔥 Hot lead: {row['title']}", score=72)
     for row in biz["stalled"]:
-        add(f"lead:{row['id']}:stalled:{now.isocalendar().week}", f"🧊 Stalled lead (5+ days quiet): {row['title']}",
+        add(f"lead:{row['id']}:stalled:{now.isocalendar().year}-W{now.isocalendar().week}", f"🧊 Stalled lead (5+ days quiet): {row['title']}",
             score=45)
     for p in quality.patterns(pa, now):
-        add(f"pattern:{p['category']}:{now.isocalendar().week}", f"📈 {p['text']}", score=68)
+        add(f"pattern:{p['category']}:{now.isocalendar().year}-W{now.isocalendar().week}", f"📈 {p['text']}", score=68)
     return sorted(out, key=lambda c: -c["score"])
 
 

@@ -68,7 +68,8 @@ def mount_pa(app: FastAPI, w) -> None:
         e.update(can_change=can_change(me, row), description=row["description"], department=row["department"],
                  owner_id=row["owner_id"], created=row_dt(row["created_at"]).astimezone(settings.tz).strftime("%d %b"),
                  data=data_of(row), value=row["value"], verification=row["verification"],
-                 related_project=row["related_project"], waiting_on=row["waiting_on"])
+                 related_project=row["related_project"], waiting_on=row["waiting_on"],
+                 next_action_raw=row["next_action"] or "", related_person_raw=row["related_person"] or "")
         return e
 
     def due_from(text: str):
@@ -130,8 +131,8 @@ def mount_pa(app: FastAPI, w) -> None:
         if isinstance(g, Response):
             return g
         agent, me, csrf = g
-        meet = agent.meetings()
         is_owner = me["id"] == settings.owner_id
+        meet = agent.meetings() if is_owner else {"today": [], "upcoming": [], "needs_capture": []}
         b = agent.briefing(meetings=meet["today"], user_name=me["name"]) if is_owner else None
         if b:  # let the founder tick items off straight from Today
             for entries in b["focus"].values():
@@ -157,14 +158,25 @@ def mount_pa(app: FastAPI, w) -> None:
         if isinstance(g, Response):
             return g
         agent, me = g
+        if me["id"] != settings.owner_id:
+            return w.oops("Meetings come from the founder's calendar, so only the founder can capture them.")
         from .pa.calendar import capture_actions
         uid = form.get("uid", "")
-        events = {e["uid"]: e for e in (agent.meetings()["today"] + agent.meetings()["upcoming"])}
-        event = events.get(uid) or {"uid": uid, "title": form.get("title", "Meeting")}
-        owner = form.get("owner") or None
-        ids = capture_actions(agent.pa, event, (form.get("actions") or "").splitlines(), me["id"], owner_id=owner,
-                              due=due_from(form.get("due", "")) if form.get("due") else None)
-        return w.back("/today#meetings", f"Captured {len(ids)} action(s) from {event['title']}.")
+        lines = [ln for ln in (form.get("actions") or "").splitlines() if ln.strip(" -•\t")]
+        if not lines:
+            return w.back("/today#meetings", "Write at least one action, one per line.")
+        try:
+            due = due_from(form.get("due", "")) if (form.get("due") or "").strip() else None
+        except TeamError as exc:
+            return w.back("/today#meetings", str(exc))
+        owner = form.get("owner") or me["id"]
+        if agent.store.user(owner) is None:
+            owner = me["id"]
+        meet = agent.meetings()
+        events = {e["uid"]: e for e in (meet["today"] + meet["upcoming"])}
+        event = events.get(uid) or {"uid": uid, "title": (form.get("title") or "Meeting")[:120]}
+        ids = capture_actions(agent.pa, event, lines, me["id"], owner_id=owner, due=due)
+        return w.back("/today#meetings", f"Captured {len(ids)} action{'s' * (len(ids) != 1)} from {event['title']}.")
 
     # --- Tasks -------------------------------------------------------------------------------------------
 
@@ -256,7 +268,7 @@ def mount_pa(app: FastAPI, w) -> None:
             return w.back("/tasks", str(exc))
         extra: dict = {}
         owner_id = form.get("owner") or None
-        if owner_id and agent.store.user(owner_id) is None:
+        if owner_id and (agent.store.user(owner_id) is None or not agent.store.user(owner_id)["active"]):
             owner_id = None
         repeat = form.get("repeat") if form.get("repeat") in dict(recurring.CHOICES) and form.get("repeat") else None
         if repeat:
@@ -328,7 +340,10 @@ def mount_pa(app: FastAPI, w) -> None:
                 if form.get("status") in STATUSES:
                     fields["status"] = form["status"]
                 if "owner" in form:
-                    fields["owner_id"] = form["owner"] or None
+                    new_owner = form["owner"] or None
+                    if new_owner and (agent.store.user(new_owner) is None or not agent.store.user(new_owner)["active"]):
+                        return w.back(f"/tasks/{item_id}", "That person isn't on the team (or is switched off). Pick someone from the list.")
+                    fields["owner_id"] = new_owner
                 if form.get("due", "").strip():
                     fields["due_at"] = due_from(form["due"])
                 elif form.get("clear_due"):
@@ -337,12 +352,17 @@ def mount_pa(app: FastAPI, w) -> None:
                     fields["stage"] = form["stage"]
                     if form["stage"] in ("converted", "lost"):
                         fields["status"] = "closed"
+                    elif fields.get("status", row["status"]) in ("closed", "verified"):
+                        fields["status"] = "open"        # moved back into the pipeline: it's live again
                         if form.get("lost_reason"):
                             data = data_of(row)
                             data["lost_reason"] = form["lost_reason"][:120]
                             fields["data"] = data
                 if row["kind"] == "lead" and form.get("value", "").strip():
-                    fields["value"] = float(form["value"].replace(",", ""))
+                    try:
+                        fields["value"] = float(form["value"].replace(",", "").replace("₹", "").strip())
+                    except ValueError:
+                        return w.back(f"/tasks/{item_id}", "Value should be a number, like 25000.")
                 if "repeat" in form:
                     data = fields.get("data") or data_of(row)
                     rule = form.get("repeat") or ""
@@ -369,8 +389,11 @@ def mount_pa(app: FastAPI, w) -> None:
                 agent.pa.update_item(item_id, me["id"], note="Moved to tomorrow", due_at=new_due, overdue_alerted=0)
                 msg = f"Moved to tomorrow {new_due:%H:%M}."
             elif action == "qa_stage":
-                qa.set_stage(agent.pa, item_id, form.get("stage", ""), me["id"], (form.get("note") or "")[:500])
-                msg = f"Moved to {QA_STAGE_LABELS.get(form.get('stage', ''), form.get('stage'))}."
+                if row["kind"] != "qa_issue" or form.get("stage") not in QA_STAGES:
+                    return w.back(f"/tasks/{item_id}", "Pick a stage from the list.")
+                if not qa.set_stage(agent.pa, item_id, form["stage"], me["id"], (form.get("note") or "")[:500]):
+                    return w.back(f"/tasks/{item_id}", "That stage couldn't be set.")
+                msg = f"Moved to {QA_STAGE_LABELS[form['stage']]}."
             elif action in ("done", "reopen", "block"):
                 status = {"done": "closed", "reopen": "open", "block": "blocked"}[action]
                 if action == "done" and row["kind"] == "qa_issue":
@@ -406,12 +429,12 @@ def mount_pa(app: FastAPI, w) -> None:
     # --- Business ---------------------------------------------------------------------------------------
 
     @app.get("/business")
-    def business_page(request: Request, days: int = 30):
+    def business_page(request: Request, days: str = "30"):
         g = signed_in(request)
         if isinstance(g, Response):
             return g
         agent, me, csrf = g
-        days = days if days in (7, 30, 90) else 30
+        days = int(days) if days in ("7", "30", "90") else 30
         p = business.pipeline(agent.pa, days=days)
         view = lambda rows: [item_view(r, me) | {"signals": p["signals"].get(r["id"], [])} for r in rows]  # noqa: E731
         stages = [(s, LEAD_STAGE_LABELS[s], view([r for r in agent.pa.items(kind="lead", status=None, limit=3000)
@@ -426,11 +449,12 @@ def mount_pa(app: FastAPI, w) -> None:
     # --- Communications (founder) ---------------------------------------------------------------------------
 
     @app.get("/communications")
-    def comms_page(request: Request, contact: int = 0):
+    def comms_page(request: Request, contact: str = ""):
         g = signed_in(request, owner=True)
         if isinstance(g, Response):
             return g
         agent, me, csrf = g
+        contact = int(contact) if contact.isdigit() else 0
         now = datetime.now(timezone.utc)
         since = now - timedelta(days=7)
         drafts = [{"id": d["id"], "to": sender_name(d["sender"]), "subject": d["subject"], "summary": d["summary"],
@@ -468,10 +492,18 @@ def mount_pa(app: FastAPI, w) -> None:
         if not recipient or not purpose:
             return w.back("/communications#compose", "Enter who it's for and what it should say.")
         name = ""
+        channel = form.get("channel") if form.get("channel") in ("whatsapp", "email") else "whatsapp"
         if contact := agent.pa.contacts(recipient, limit=1):
             name = contact[0]["name"]
-            recipient = (contact[0]["phone"] if form.get("channel") == "whatsapp" else contact[0]["email"]) or recipient
-        agent.compose(form.get("channel", "whatsapp"), recipient, purpose, me["id"], recipient_name=name,
+            recipient = (contact[0]["phone"] if channel == "whatsapp" else contact[0]["email"]) or recipient
+        if channel == "email" and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", recipient):
+            return w.back("/communications#compose", f"I don't have an email address for \"{recipient}\". Type the address, or add it to the contact.")
+        if channel == "whatsapp":
+            digits = re.sub(r"\D", "", recipient)
+            if len(digits) < 8:
+                return w.back("/communications#compose", f"I don't have a WhatsApp number for \"{recipient}\". Type the number with country code, e.g. 919876543210.")
+            recipient = digits
+        agent.compose(channel, recipient, purpose, me["id"], recipient_name=name,
                       subject=(form.get("subject") or "")[:120])
         return w.back("/communications#approvals", "Draft ready. Check it and approve to send.")
 
@@ -499,8 +531,19 @@ def mount_pa(app: FastAPI, w) -> None:
         if isinstance(g, Response):
             return g
         agent, me = g
-        agent.pa.update_contact(contact_id, **{k: (form.get(k) or "").strip()[:300] for k in
-                                               ("name", "email", "phone", "organization", "role", "notes") if k in form})
+        if me["id"] != settings.owner_id:
+            return w.oops("Only the founder can change contacts.")
+        if agent.pa.contact(contact_id) is None:
+            return w.back("/communications#contacts", "That contact isn't there any more.")
+        values = {k: (form.get(k) or "").strip()[:300] for k in ("name", "email", "phone", "organization", "role", "notes")
+                  if k in form}
+        if "role" in values and values["role"] not in CONTACT_ROLES:
+            values.pop("role")
+        if values.get("phone"):
+            values["phone"] = re.sub(r"\D", "", values["phone"])
+        if values.get("email") and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", values["email"]):
+            return w.back("/communications#contacts", "That email address doesn't look right.")
+        agent.pa.update_contact(contact_id, **values)
         return w.back("/communications#contacts", "Contact saved.")
 
     # --- Application QA ---------------------------------------------------------------------------------------
@@ -529,6 +572,8 @@ def mount_pa(app: FastAPI, w) -> None:
         if isinstance(g, Response):
             return g
         agent, me = g
+        if me["role"] != "admin":
+            return w.oops("Only admins can start application checks (they sign in with the shared test accounts).")
         if environment not in qa.ENVIRONMENTS:
             return w.back("/qa", "Unknown environment.")
         if _qa_running.get(environment):
@@ -562,12 +607,12 @@ def mount_pa(app: FastAPI, w) -> None:
     # --- Quality ---------------------------------------------------------------------------------------------
 
     @app.get("/quality")
-    def quality_page(request: Request, days: int = 30):
+    def quality_page(request: Request, days: str = "30"):
         g = signed_in(request)
         if isinstance(g, Response):
             return g
         agent, me, csrf = g
-        days = days if days in (14, 30, 90) else 30
+        days = int(days) if days in ("14", "30", "90") else 30
         q = quality.summary(agent.pa, days=days)
         by_cat: dict[str, list] = {}
         for r in q["open"]:
@@ -772,7 +817,18 @@ def mount_pa(app: FastAPI, w) -> None:
                     ZoneInfo(tz)
                 except Exception as exc:
                     raise ValueError(f'"{tz}" is not a timezone. Example: Asia/Kolkata') from exc
-            hours = form.get("reply_hours") or ""
+            hours = (form.get("reply_hours") or "").strip()
+            if hours:
+                try:
+                    if not 0.5 <= float(hours) <= 72:
+                        raise ValueError
+                except ValueError:
+                    raise ValueError("Reply promise should be a number of business hours between 0.5 and 72, e.g. 4.")
+            start, end = _clock(form.get("work_start"), "Work starts"), _clock(form.get("work_end"), "Work ends")
+            if start and end and end <= start:
+                raise ValueError("Work should end after it starts.")
+            if not any(form.get(f"day_{d}") for d in ("mon", "tue", "wed", "thu", "fri", "sat", "sun")):
+                raise ValueError("Tick at least one working day.")
             prefs.save(store, {
                 "company_name": (form.get("company_name") or "NeuraNova").strip()[:60], "timezone": tz,
                 "work_start": form.get("work_start") or "", "work_end": form.get("work_end") or "",
@@ -829,10 +885,10 @@ def mount_pa(app: FastAPI, w) -> None:
                                                               "auto_draft_followups")}, me["id"])
             return "Notification choices saved."
         if key == "scheduler":
-            for k in ("morning_brief", "weekly_time"):
-                v = form.get(k) or ""
-                if v and not re.fullmatch(r"\d{1,2}:\d{2}", v):
-                    raise ValueError("Times look like 08:30.")
+            _clock(form.get("morning_brief"), "Morning Brief time")
+            _clock(form.get("weekly_time"), "Weekly summary time")
+            if form.get("weekly_day") and form["weekly_day"] not in ("mon", "tue", "wed", "thu", "fri", "sat", "sun"):
+                raise ValueError("Pick a day from the list.")
             prefs.save(store, {"morning_brief": form.get("morning_brief") or "", "weekly_day": form.get("weekly_day") or "",
                                "weekly_time": form.get("weekly_time") or ""}, me["id"])
             return "Saved. New times apply after the console restarts."
@@ -995,3 +1051,15 @@ def _cell(value) -> str:
     """Spreadsheet safety: text starting with = + - @ is shown as text, never run as a formula."""
     text = "" if value is None else str(value)
     return "'" + text if text[:1] in ("=", "+", "-", "@", "\t", "\r") else text
+
+
+def _clock(value, label: str):
+    """'09:30' → time; empty → None; anything else → a friendly error."""
+    from datetime import time as _time
+    value = (value or "").strip()
+    if not value:
+        return None
+    try:
+        return _time.fromisoformat(value if len(value) > 4 else "0" + value)
+    except ValueError:
+        raise ValueError(f"{label}: times look like 09:30.") from None

@@ -14,12 +14,15 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   windows:
     runs-on: windows-latest
     timeout-minutes: 45
     env:
-      PYTHONUTF8: "1"
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
     steps:
       - uses: actions/checkout@v4
@@ -36,6 +39,8 @@ jobs:
 
       - name: Unit tests (Windows)
         shell: pwsh
+        env:
+          PYTHONUTF8: "1"
         run: |
           $chrome = "C:\Program Files\Google\Chrome\Application\chrome.exe"
           if (Test-Path $chrome) { $env:NEURANOVA_CHROMIUM = $chrome }
@@ -101,15 +106,12 @@ jobs:
             dist/NeuraNova-PA-Windows-*.zip
           retention-days: 30
 
-      - name: Remove the previous files from the "latest" release
+      - name: Move the "latest" tag to this build
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          $names = gh release view latest --repo ${{ github.repository }} --json assets -q '.assets[].name' 2>$null
-          foreach ($n in $names) { if ($n) { gh release delete-asset latest $n --repo ${{ github.repository }} -y } }
-          exit 0
+          git tag -f latest
+          git push -f origin refs/tags/latest
 
       - name: Publish "latest" release
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -128,3 +130,14 @@ jobs:
             dist/NeuraNova-PA-Setup.exe
             dist/NeuraNova-PA-Windows.zip
             dist/NeuraNova-PA-Setup-*.exe
+
+      - name: Remove files from older versions (after the new ones are up)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $v = "${{ steps.v.outputs.version }}"
+          $keep = @("NeuraNova-PA-Setup.exe", "NeuraNova-PA-Windows.zip", "NeuraNova-PA-Setup-$v.exe")
+          $names = gh release view latest --repo ${{ github.repository }} --json assets -q '.assets[].name'
+          foreach ($n in $names) { if ($n -and ($keep -notcontains $n)) { gh release delete-asset latest $n --repo ${{ github.repository }} -y } }

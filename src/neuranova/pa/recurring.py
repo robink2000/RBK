@@ -140,13 +140,15 @@ def follow_on(store_pa, row, actor: str) -> int | None:
     from ..db import row_dt
     data = json.loads(row["data"] or "{}")
     rule = data.get("repeat")
-    if not rule:
+    if not rule or data.get("next_created"):     # already made the next one (closed, reopened, closed again)
         return None
     try:
         tz = ZoneInfo(data.get("tz") or "UTC")
     except Exception:
         tz = ZoneInfo("UTC")
     base = row_dt(row["due_at"]).astimezone(tz) if row["due_at"] else datetime.now(tz)
+    if rule == "monthly":                        # pin the day so Jan 31 → Feb 28 → Mar 31, not → Mar 28
+        rule = data["repeat"] = f"monthly:{data.get('repeat_day') or base.day}"
     nxt = next_due(rule, base, base.timetz().replace(tzinfo=None))
     now = datetime.now(tz)
     while nxt <= now:                       # closed late: skip to the next one still ahead
@@ -156,6 +158,9 @@ def follow_on(store_pa, row, actor: str) -> int | None:
         owner_id=row["owner_id"], priority=row["priority"], related_person=row["related_person"],
         related_project=row["related_project"], contact_id=row["contact_id"], source=row["source"] or "manual",
         status="waiting" if row["kind"] == "waiting" else "open", due_at=nxt, data=data)
+    done = json.loads(row["data"] or "{}")
+    done["next_created"] = new_id
+    store_pa.conn.execute("UPDATE items SET data = ? WHERE id = ?", (json.dumps(done), row["id"]))
     store_pa._event(row["id"], "PA", "note", f"Next one created: #{new_id}, due {nxt:%a %d %b %H:%M}")
     store_pa.conn.commit()
     return new_id

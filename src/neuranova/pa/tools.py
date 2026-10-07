@@ -106,6 +106,8 @@ class PATools:
         now = datetime.now(self.settings.tz)
         try:
             dt = datetime.fromisoformat(text)
+            if len(text.strip()) <= 10:     # a date without a time: end of the working day, not midnight
+                dt = datetime.combine(dt.date(), self.settings.working_hours.end)
             return dt if dt.tzinfo else dt.replace(tzinfo=self.settings.tz)
         except ValueError:
             due = parse_deadline(text, now, end_of_day=self.settings.working_hours.end)

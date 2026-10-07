@@ -160,7 +160,7 @@ def analyze(llm, pa: PAStore, msg: Incoming, goals: str, tz, team: list[str]) ->
     return llm.json(ANALYSIS_SYSTEM.format(goals=goals), user, ANALYSIS_SCHEMA, effort="low", max_tokens=8000)
 
 
-def _resolve_due(op: dict, tz, end_of_day) -> datetime | None:
+def _resolve_due(op: dict, tz, end_of_day, sent_at: datetime | None = None) -> datetime | None:
     if op.get("due_iso"):
         try:
             dt = datetime.fromisoformat(op["due_iso"].replace("Z", "+00:00"))
@@ -168,7 +168,9 @@ def _resolve_due(op: dict, tz, end_of_day) -> datetime | None:
         except ValueError:
             pass
     if op.get("due_text"):
-        return parse_deadline(op["due_text"], datetime.now(tz), end_of_day=end_of_day)
+        # "tomorrow" means the day after the message was sent, not after we happened to read it
+        base = sent_at.astimezone(tz) if sent_at else datetime.now(tz)
+        return parse_deadline(op["due_text"], base, end_of_day=end_of_day)
     return None
 
 
@@ -201,7 +203,7 @@ def _apply_one(pa: PAStore, op: dict, msg: Incoming, *, tz, end_of_day, find_own
     kind = op.get("kind") if op.get("kind") in KINDS else "task"
     name = op.get("op")
     title = (op.get("title") or "").strip()[:200]
-    due = _resolve_due(op, tz, end_of_day)
+    due = _resolve_due(op, tz, end_of_day, msg.at)
     owner_id = None
     if op.get("owner_hint"):
         if find_owner is None:
@@ -220,15 +222,17 @@ def _apply_one(pa: PAStore, op: dict, msg: Incoming, *, tz, end_of_day, find_own
             target = None
     if target is None and name != "create":
         # an update for something we can't find: fall back to the closest open item, or create
+        # closing needs a near-certain match: never close the wrong promise because two titles share words
+        strict = name in ("close", "done_pending_verification", "move_to_retest")
         target = pa.similar_open(title, kind=kind, person=op.get("related_person") or op.get("waiting_on") or "",
-                                 threshold=0.5) if title else None
-        if target is None and name in ("close", "done_pending_verification", "move_to_retest"):
+                                 threshold=0.8 if strict else 0.65) if title else None
+        if target is None and strict:
             return None
         if target is None:
             name = "create"
     if name == "create" and title:
         dupe = pa.similar_open(title, kind=kind, person=op.get("related_person") or op.get("waiting_on") or "",
-                               threshold=0.6)
+                               threshold=0.7)
         if dupe is not None:
             target, name = dupe, "update"
 

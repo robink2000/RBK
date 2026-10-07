@@ -78,7 +78,7 @@ def load_settings(config_path: str | Path | None = None, env: dict[str, str] | N
         load_dotenv(find_dotenv(usecwd=True))
         env = dict(os.environ)
     path = Path(config_path or env.get("NEURANOVA_CONFIG") or "neuranova.toml")
-    raw = tomllib.loads(path.read_text()) if path.exists() else {}
+    raw = tomllib.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 
     ws = raw.get("workspace", {})
     wh = raw.get("working_hours", {})

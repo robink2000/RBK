@@ -1,6 +1,6 @@
 [project]
 name = "neuranova-agent"
-version = "1.2.0"
+version = "1.2.1"
 description = "NeuraNova PA: personal assistant for business growth, operations, communication, quality and progress."
 requires-python = ">=3.11"
 dependencies = [
